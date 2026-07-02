@@ -9,6 +9,21 @@ type PreviewFrameProps = {
 
 const STREAMING_COMMIT_INTERVAL_MS = 120;
 const SCROLL_SETTLE_MS = 160;
+const PERFORMANCE_GUARD_ID = "streamui-performance-guard";
+const PERFORMANCE_GUARD_CSS = `
+*, *::before, *::after {
+  background-attachment: scroll !important;
+}
+`;
+
+function applyPerformanceGuard(document: Document) {
+  document.getElementById(PERFORMANCE_GUARD_ID)?.remove();
+
+  const style = document.createElement("style");
+  style.id = PERFORMANCE_GUARD_ID;
+  style.textContent = PERFORMANCE_GUARD_CSS;
+  document.body.append(style);
+}
 
 function runBodyScripts(document: Document) {
   document.body.querySelectorAll("script").forEach((script) => {
@@ -45,6 +60,7 @@ export function PreviewFrame({ snapshot, onRuntimeError }: PreviewFrameProps) {
     }
 
     if (renderedHtmlRef.current === nextSnapshot.completedHtml) {
+      applyPerformanceGuard(document);
       return;
     }
 
@@ -54,6 +70,7 @@ export function PreviewFrame({ snapshot, onRuntimeError }: PreviewFrameProps) {
       }
 
       document.body.innerHTML = nextSnapshot.completedHtml;
+      applyPerformanceGuard(document);
       runBodyScripts(document);
       renderedHtmlRef.current = nextSnapshot.completedHtml;
       completedHtmlRef.current = nextSnapshot.completedHtml;
@@ -63,6 +80,7 @@ export function PreviewFrame({ snapshot, onRuntimeError }: PreviewFrameProps) {
 
     completedHtmlRef.current = "";
     document.body.innerHTML = nextSnapshot.completedHtml;
+    applyPerformanceGuard(document);
     renderedHtmlRef.current = nextSnapshot.completedHtml;
     lastCommitTimeRef.current = performance.now();
   }, []);

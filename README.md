@@ -55,6 +55,7 @@ npm --workspace @streamui/web run build
 StreamUI has a private server-side agent loop backed by an independent retrieval service. The loop first asks the model to decide whether tools are needed, executes approved local tools, then starts one final streamed HTML generation. The retrieval tool can:
 
 - Search the web through Brave, Tavily, Serper, or a DuckDuckGo HTML fallback.
+- Search dedicated visual sources for image/gallery prompts, including Openverse, Wikimedia-oriented web results, NASA, Library of Congress, The Met, Art Institute of Chicago, and optional Pexels, Unsplash, and Rijksmuseum integrations.
 - Fetch requested URLs with Node `fetch`, or optional Playwright when `STREAMUI_BROWSER_ENGINE=playwright` and Playwright is installed.
 - Parse HTML into structured page excerpts, links, source metadata, and image candidates.
 - Inject those sources into the final model generation while keeping the current streaming HTML protocol. The HTML artifact is still assistant content, not a tool result.
@@ -83,6 +84,9 @@ STREAMUI_RETRIEVAL_ALLOW_PRIVATE_URLS=false
 BRAVE_SEARCH_API_KEY=
 TAVILY_API_KEY=
 SERPER_API_KEY=
+PEXELS_API_KEY=
+UNSPLASH_ACCESS_KEY=
+RIJKSMUSEUM_API_KEY=
 ```
 
 The sandboxed artifact can use HTTPS images, media, iframes, stylesheets, scripts, and CORS-friendly runtime requests. The preview iframe includes `allow-same-origin` so browser extensions that expect a page origin can run without noisy `null`-origin sandbox errors. The renderer still flags browser storage, cookies, parent/top/opener access, permissions APIs, and `document.write`.

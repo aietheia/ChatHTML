@@ -281,6 +281,11 @@ export function buildIframeDocument(
 </head>
 <body>
 ${completedHtml}
+<style id="streamui-performance-guard">
+  *, *::before, *::after {
+    background-attachment: scroll !important;
+  }
+</style>
 </body>
 </html>`;
 }

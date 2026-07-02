@@ -73,6 +73,39 @@ function stabilizeViewportHeightUnits(input: string): string {
   );
 }
 
+function neutralizeExpensiveCssDeclarations(css: string): string {
+  return css
+    .replace(
+      /\bbackground-attachment\s*:\s*fixed\b/gi,
+      "background-attachment: scroll"
+    )
+    .replace(
+      /\b(background(?:-image)?\s*:[^;{}]*?)\bfixed\b/gi,
+      "$1scroll"
+    )
+    .replace(/\s*-webkit-backdrop-filter\s*:[^;{}]+;?/gi, "")
+    .replace(/\s*backdrop-filter\s*:[^;{}]+;?/gi, "")
+    .replace(
+      /\bfilter\s*:\s*[^;{}]*(?:blur|drop-shadow)\([^;{}]*;?/gi,
+      "filter: none;"
+    )
+    .replace(/\bmix-blend-mode\s*:\s*(?!normal\b)[^;{}]+;?/gi, "mix-blend-mode: normal;");
+}
+
+function neutralizeExpensiveCss(input: string): string {
+  return input
+    .replace(
+      /(<style\b[^>]*>)([\s\S]*?)(<\/style\s*>)/gi,
+      (_match, openTag: string, css: string, closeTag: string) =>
+        `${openTag}${neutralizeExpensiveCssDeclarations(css)}${closeTag}`
+    )
+    .replace(
+      /\sstyle=(["'])([^"']*)\1/gi,
+      (_match, quote: string, css: string) =>
+        ` style=${quote}${neutralizeExpensiveCssDeclarations(css)}${quote}`
+    );
+}
+
 function closeIncompleteStyleBlock(
   input: string,
   allowPartialStyles: boolean
@@ -159,6 +192,7 @@ export function completePartialHtml(
     withStableViewportUnits,
     allowPartialStyles
   );
+  const withPerformanceSafeCss = neutralizeExpensiveCss(withClosedStyle);
 
-  return appendMissingClosers(withClosedStyle);
+  return appendMissingClosers(withPerformanceSafeCss);
 }

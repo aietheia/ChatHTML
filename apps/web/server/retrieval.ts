@@ -33,6 +33,10 @@ export type RetrievedImage = {
   alt?: string;
   width?: number;
   height?: number;
+  creator?: string;
+  credit?: string;
+  license?: string;
+  licenseUrl?: string;
 };
 
 export type RetrievedLink = {
@@ -84,6 +88,13 @@ type SearchResult = {
   title?: string;
   snippet?: string;
   imageUrl?: string;
+  imageAlt?: string;
+  imageWidth?: number;
+  imageHeight?: number;
+  imageCreator?: string;
+  imageCredit?: string;
+  imageLicense?: string;
+  imageLicenseUrl?: string;
   provider: string;
   rank: number;
 };
@@ -428,9 +439,9 @@ function buildSearchQueries(text: string): string[] {
   }
 
   return uniqueStrings([
-    `${query} site:commons.wikimedia.org`,
+    query,
     `${query} Wikimedia Commons`,
-    query
+    `${query} site:commons.wikimedia.org`
   ]).slice(0, 3);
 }
 
@@ -684,6 +695,33 @@ function uniqueByUrl<T extends { url: string }>(items: T[]): T[] {
   return unique;
 }
 
+function compactParts(values: Array<string | undefined>): string | undefined {
+  const parts = values
+    .map((value) => clip(value, 220))
+    .filter((value): value is string => Boolean(value));
+
+  return parts.length ? parts.join(" · ") : undefined;
+}
+
+function imageFromSearchResult(
+  result: SearchResult | undefined
+): RetrievedImage | undefined {
+  if (!result?.imageUrl) {
+    return undefined;
+  }
+
+  return {
+    url: result.imageUrl,
+    alt: result.imageAlt || result.title,
+    width: result.imageWidth,
+    height: result.imageHeight,
+    creator: result.imageCreator,
+    credit: result.imageCredit,
+    license: result.imageLicense,
+    licenseUrl: result.imageLicenseUrl
+  };
+}
+
 function parseSrcset(value: string): string[] {
   return value
     .split(",")
@@ -709,7 +747,7 @@ function parseHtmlSource(
       status: page.status,
       contentType: page.contentType,
       fetchedAt: page.fetchedAt,
-      images: seed?.imageUrl ? [{ url: seed.imageUrl }] : [],
+      images: imageFromSearchResult(seed) ? [imageFromSearchResult(seed)!] : [],
       links: []
     };
   }
@@ -756,6 +794,7 @@ function parseHtmlSource(
   });
 
   const images: RetrievedImage[] = [];
+  const seedImage = imageFromSearchResult(seed);
   const pushImage = (rawUrl: string | undefined, alt?: string) => {
     if (!rawUrl) {
       return;
@@ -773,7 +812,9 @@ function parseHtmlSource(
   };
 
   pushImage($("meta[property='og:image']").attr("content"), title);
-  pushImage(seed?.imageUrl, seed?.title);
+  if (seedImage) {
+    images.push(seedImage);
+  }
   $("img[src], img[data-src]").each((_, el) => {
     const src = $(el).attr("src") || $(el).attr("data-src");
     const imageUrl = parseAbsoluteUrl(src ?? "", page.finalUrl);
@@ -808,7 +849,9 @@ function parseHtmlSource(
     status: page.status,
     contentType: page.contentType,
     fetchedAt: page.fetchedAt,
-    images: uniqueByUrl(images).slice(0, config.maxImagesPerPage),
+    images: seedImage
+      ? [seedImage]
+      : uniqueByUrl(images).slice(0, config.maxImagesPerPage),
     links: uniqueByUrl(links).slice(0, config.maxLinksPerPage)
   };
 }
@@ -1024,6 +1067,604 @@ async function searchDuckDuckGo(
   return results;
 }
 
+function imageProviderLimit(config: RetrievalConfig): number {
+  return Math.min(12, Math.max(4, config.searchMaxResults));
+}
+
+function cleanImageProviderQuery(query: string): string {
+  return (
+    clip(
+      query
+        .replace(/\bsite:\S+/gi, " ")
+        .replace(/\b(?:wikimedia commons|openverse|pexels|unsplash)\b/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim(),
+      220
+    ) || query
+  );
+}
+
+async function searchOpenverseImages(
+  query: string,
+  config: RetrievalConfig
+): Promise<SearchResult[]> {
+  const url = new URL("https://api.openverse.org/v1/images/");
+  url.searchParams.set("q", query);
+  url.searchParams.set("page_size", String(imageProviderLimit(config)));
+  url.searchParams.set("mature", "false");
+
+  const data = (await fetchJson(
+    url.toString(),
+    {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": USER_AGENT
+      }
+    },
+    config.timeoutMs
+  )) as {
+    results?: Array<{
+      title?: string;
+      foreign_landing_url?: string;
+      url?: string;
+      thumbnail?: string;
+      creator?: string;
+      creator_url?: string;
+      license?: string;
+      license_version?: string;
+      license_url?: string;
+      provider?: string;
+      source?: string;
+      width?: number;
+      height?: number;
+    }>;
+  };
+
+  return (data.results ?? [])
+    .map((result, index) => {
+      const license = compactParts([result.license, result.license_version]);
+      return {
+        url: parseAbsoluteUrl(result.foreign_landing_url ?? result.url ?? "") ?? "",
+        title: clip(result.title, 220),
+        snippet: compactParts([
+          result.creator ? `Creator: ${result.creator}` : undefined,
+          license ? `License: ${license}` : undefined,
+          result.source || result.provider
+        ]),
+        imageUrl: parseAbsoluteUrl(result.url ?? result.thumbnail ?? ""),
+        imageAlt: clip(result.title, 160),
+        imageWidth: result.width,
+        imageHeight: result.height,
+        imageCreator: clip(result.creator, 160),
+        imageCredit: compactParts([result.creator, result.source || result.provider]),
+        imageLicense: license,
+        imageLicenseUrl: parseAbsoluteUrl(result.license_url ?? ""),
+        provider: "openverse",
+        rank: index + 1
+      };
+    })
+    .filter((result) => result.url && result.imageUrl);
+}
+
+async function searchPexelsImages(
+  query: string,
+  config: RetrievalConfig
+): Promise<SearchResult[]> {
+  const apiKey = process.env.PEXELS_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("PEXELS_API_KEY is not set.");
+  }
+
+  const url = new URL("https://api.pexels.com/v1/search");
+  url.searchParams.set("query", query);
+  url.searchParams.set("per_page", String(imageProviderLimit(config)));
+
+  const data = (await fetchJson(
+    url.toString(),
+    {
+      headers: {
+        Accept: "application/json",
+        Authorization: apiKey,
+        "User-Agent": USER_AGENT
+      }
+    },
+    config.timeoutMs
+  )) as {
+    photos?: Array<{
+      url?: string;
+      width?: number;
+      height?: number;
+      alt?: string;
+      photographer?: string;
+      photographer_url?: string;
+      src?: {
+        original?: string;
+        large2x?: string;
+        large?: string;
+        medium?: string;
+      };
+    }>;
+  };
+
+  return (data.photos ?? [])
+    .map((photo, index) => ({
+      url: parseAbsoluteUrl(photo.url ?? "") ?? "",
+      title: clip(photo.alt || `Pexels photo by ${photo.photographer ?? "unknown"}`, 220),
+      snippet: compactParts([
+        photo.photographer ? `Photographer: ${photo.photographer}` : undefined,
+        "Pexels license"
+      ]),
+      imageUrl: parseAbsoluteUrl(
+        photo.src?.large2x ?? photo.src?.large ?? photo.src?.original ?? photo.src?.medium ?? ""
+      ),
+      imageAlt: clip(photo.alt, 160),
+      imageWidth: photo.width,
+      imageHeight: photo.height,
+      imageCreator: clip(photo.photographer, 160),
+      imageCredit: photo.photographer ? `Photo by ${photo.photographer} on Pexels` : "Pexels",
+      imageLicense: "Pexels license",
+      imageLicenseUrl: "https://www.pexels.com/license/",
+      provider: "pexels",
+      rank: index + 1
+    }))
+    .filter((result) => result.url && result.imageUrl);
+}
+
+async function searchUnsplashImages(
+  query: string,
+  config: RetrievalConfig
+): Promise<SearchResult[]> {
+  const accessKey = process.env.UNSPLASH_ACCESS_KEY?.trim();
+  if (!accessKey) {
+    throw new Error("UNSPLASH_ACCESS_KEY is not set.");
+  }
+
+  const url = new URL("https://api.unsplash.com/search/photos");
+  url.searchParams.set("query", query);
+  url.searchParams.set("per_page", String(imageProviderLimit(config)));
+  url.searchParams.set("content_filter", "high");
+
+  const data = (await fetchJson(
+    url.toString(),
+    {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Client-ID ${accessKey}`,
+        "User-Agent": USER_AGENT
+      }
+    },
+    config.timeoutMs
+  )) as {
+    results?: Array<{
+      alt_description?: string;
+      description?: string;
+      width?: number;
+      height?: number;
+      urls?: {
+        regular?: string;
+        full?: string;
+        raw?: string;
+        small?: string;
+      };
+      links?: {
+        html?: string;
+      };
+      user?: {
+        name?: string;
+        links?: {
+          html?: string;
+        };
+      };
+    }>;
+  };
+
+  return (data.results ?? [])
+    .map((photo, index) => {
+      const title =
+        photo.description || photo.alt_description || `Unsplash photo by ${photo.user?.name ?? "unknown"}`;
+      return {
+        url: parseAbsoluteUrl(photo.links?.html ?? "") ?? "",
+        title: clip(title, 220),
+        snippet: compactParts([
+          photo.user?.name ? `Photographer: ${photo.user.name}` : undefined,
+          "Unsplash license"
+        ]),
+        imageUrl: parseAbsoluteUrl(
+          photo.urls?.regular ?? photo.urls?.full ?? photo.urls?.small ?? photo.urls?.raw ?? ""
+        ),
+        imageAlt: clip(photo.alt_description || photo.description, 160),
+        imageWidth: photo.width,
+        imageHeight: photo.height,
+        imageCreator: clip(photo.user?.name, 160),
+        imageCredit: photo.user?.name ? `Photo by ${photo.user.name} on Unsplash` : "Unsplash",
+        imageLicense: "Unsplash license",
+        imageLicenseUrl: "https://unsplash.com/license",
+        provider: "unsplash",
+        rank: index + 1
+      };
+    })
+    .filter((result) => result.url && result.imageUrl);
+}
+
+async function searchNasaImages(
+  query: string,
+  config: RetrievalConfig
+): Promise<SearchResult[]> {
+  const url = new URL("https://images-api.nasa.gov/search");
+  url.searchParams.set("q", query);
+  url.searchParams.set("media_type", "image");
+  url.searchParams.set("page_size", String(imageProviderLimit(config)));
+
+  const data = (await fetchJson(
+    url.toString(),
+    {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": USER_AGENT
+      }
+    },
+    config.timeoutMs
+  )) as {
+    collection?: {
+      items?: Array<{
+        data?: Array<{
+          title?: string;
+          description?: string;
+          nasa_id?: string;
+        }>;
+        links?: Array<{
+          href?: string;
+          rel?: string;
+          render?: string;
+        }>;
+      }>;
+    };
+  };
+
+  return (data.collection?.items ?? [])
+    .map((item, index) => {
+      const metadata = item.data?.[0] ?? {};
+      const preview =
+        item.links?.find((link) => link.rel === "preview" || link.render === "image")
+          ?.href ?? item.links?.[0]?.href;
+      const sourceUrl = metadata.nasa_id
+        ? `https://images.nasa.gov/details/${encodeURIComponent(metadata.nasa_id)}`
+        : "https://images.nasa.gov/";
+
+      return {
+        url: sourceUrl,
+        title: clip(metadata.title, 220),
+        snippet: compactParts([clip(metadata.description, 320), "NASA Image and Video Library"]),
+        imageUrl: parseAbsoluteUrl(preview ?? ""),
+        imageAlt: clip(metadata.title, 160),
+        imageCredit: "NASA Image and Video Library",
+        imageLicense: "NASA media guidelines",
+        imageLicenseUrl: "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+        provider: "nasa",
+        rank: index + 1
+      };
+    })
+    .filter((result) => result.url && result.imageUrl);
+}
+
+async function searchLibraryOfCongressImages(
+  query: string,
+  config: RetrievalConfig
+): Promise<SearchResult[]> {
+  const url = new URL("https://www.loc.gov/photos/");
+  url.searchParams.set("fo", "json");
+  url.searchParams.set("q", query);
+  url.searchParams.set("c", String(imageProviderLimit(config)));
+
+  const data = (await fetchJson(
+    url.toString(),
+    {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": USER_AGENT
+      }
+    },
+    config.timeoutMs
+  )) as {
+    results?: Array<{
+      title?: string;
+      url?: string;
+      description?: string | string[];
+      contributor_names?: string[];
+      image_url?: string[];
+    }>;
+  };
+
+  return (data.results ?? [])
+    .map((item, index) => {
+      const imageUrls = item.image_url ?? [];
+      const imageUrl = imageUrls[imageUrls.length - 1] ?? imageUrls[0];
+      const description = Array.isArray(item.description)
+        ? item.description.join(" ")
+        : item.description;
+
+      return {
+        url: parseAbsoluteUrl(item.url ?? "") ?? "",
+        title: clip(item.title, 220),
+        snippet: compactParts([
+          clip(description, 320),
+          item.contributor_names?.[0] ? `Contributor: ${item.contributor_names[0]}` : undefined,
+          "Library of Congress"
+        ]),
+        imageUrl: parseAbsoluteUrl(imageUrl ?? ""),
+        imageAlt: clip(item.title, 160),
+        imageCreator: clip(item.contributor_names?.[0], 160),
+        imageCredit: "Library of Congress",
+        imageLicense: "Library of Congress rights advisory",
+        imageLicenseUrl: "https://www.loc.gov/free-to-use/",
+        provider: "loc",
+        rank: index + 1
+      };
+    })
+    .filter((result) => result.url && result.imageUrl);
+}
+
+async function searchMetImages(
+  query: string,
+  config: RetrievalConfig
+): Promise<SearchResult[]> {
+  const searchUrl = new URL(
+    "https://collectionapi.metmuseum.org/public/collection/v1/search"
+  );
+  searchUrl.searchParams.set("hasImages", "true");
+  searchUrl.searchParams.set("q", query);
+
+  const searchData = (await fetchJson(
+    searchUrl.toString(),
+    {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": USER_AGENT
+      }
+    },
+    config.timeoutMs
+  )) as {
+    objectIDs?: number[];
+  };
+
+  const objectIds = (searchData.objectIDs ?? []).slice(0, imageProviderLimit(config));
+  const objects = await mapLimited(objectIds, 4, async (objectId) => {
+    const objectUrl = `https://collectionapi.metmuseum.org/public/collection/v1/objects/${objectId}`;
+    return fetchJson(
+      objectUrl,
+      {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": USER_AGENT
+        }
+      },
+      config.timeoutMs
+    ) as Promise<{
+      objectID?: number;
+      title?: string;
+      artistDisplayName?: string;
+      objectDate?: string;
+      objectURL?: string;
+      primaryImage?: string;
+      primaryImageSmall?: string;
+      isPublicDomain?: boolean;
+    }>;
+  });
+
+  return objects
+    .map((object, index) => ({
+      url:
+        parseAbsoluteUrl(object.objectURL ?? "") ??
+        `https://www.metmuseum.org/art/collection/search/${object.objectID ?? ""}`,
+      title: clip(object.title, 220),
+      snippet: compactParts([
+        object.artistDisplayName ? `Artist: ${object.artistDisplayName}` : undefined,
+        object.objectDate,
+        object.isPublicDomain ? "Public domain image from The Met Open Access" : "The Met Collection"
+      ]),
+      imageUrl: parseAbsoluteUrl(object.primaryImageSmall ?? object.primaryImage ?? ""),
+      imageAlt: clip(object.title, 160),
+      imageCreator: clip(object.artistDisplayName, 160),
+      imageCredit: "The Metropolitan Museum of Art",
+      imageLicense: object.isPublicDomain ? "Public domain" : "The Met image terms",
+      imageLicenseUrl: "https://www.metmuseum.org/hubs/open-access",
+      provider: "met",
+      rank: index + 1
+    }))
+    .filter((result) => result.url && result.imageUrl);
+}
+
+async function searchArtInstituteImages(
+  query: string,
+  config: RetrievalConfig
+): Promise<SearchResult[]> {
+  const url = new URL("https://api.artic.edu/api/v1/artworks/search");
+  url.searchParams.set("q", query);
+  url.searchParams.set("limit", String(imageProviderLimit(config)));
+  url.searchParams.set(
+    "fields",
+    "id,title,artist_display,date_display,image_id,thumbnail"
+  );
+
+  const data = (await fetchJson(
+    url.toString(),
+    {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": USER_AGENT
+      }
+    },
+    config.timeoutMs
+  )) as {
+    config?: {
+      iiif_url?: string;
+    };
+    data?: Array<{
+      id?: number;
+      title?: string;
+      artist_display?: string;
+      date_display?: string;
+      image_id?: string;
+      thumbnail?: {
+        alt_text?: string;
+      };
+    }>;
+  };
+
+  const iiifBase = data.config?.iiif_url || "https://www.artic.edu/iiif/2";
+
+  return (data.data ?? [])
+    .map((artwork, index) => ({
+      url: artwork.id ? `https://www.artic.edu/artworks/${artwork.id}` : "",
+      title: clip(artwork.title, 220),
+      snippet: compactParts([
+        artwork.artist_display ? `Artist: ${artwork.artist_display}` : undefined,
+        artwork.date_display,
+        "Art Institute of Chicago"
+      ]),
+      imageUrl: artwork.image_id
+        ? `${iiifBase}/${encodeURIComponent(artwork.image_id)}/full/843,/0/default.jpg`
+        : undefined,
+      imageAlt: clip(artwork.thumbnail?.alt_text || artwork.title, 160),
+      imageCreator: clip(artwork.artist_display, 160),
+      imageCredit: "Art Institute of Chicago",
+      imageLicense: "Art Institute of Chicago Open Access",
+      imageLicenseUrl: "https://www.artic.edu/open-access/open-access-images",
+      provider: "artic",
+      rank: index + 1
+    }))
+    .filter((result) => result.url && result.imageUrl);
+}
+
+async function searchRijksmuseumImages(
+  query: string,
+  config: RetrievalConfig
+): Promise<SearchResult[]> {
+  const apiKey =
+    process.env.RIJKSMUSEUM_API_KEY?.trim() || process.env.RIJKS_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("RIJKSMUSEUM_API_KEY is not set.");
+  }
+
+  const url = new URL("https://www.rijksmuseum.nl/api/en/collection");
+  url.searchParams.set("key", apiKey);
+  url.searchParams.set("q", query);
+  url.searchParams.set("imgonly", "True");
+  url.searchParams.set("ps", String(imageProviderLimit(config)));
+
+  const data = (await fetchJson(
+    url.toString(),
+    {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": USER_AGENT
+      }
+    },
+    config.timeoutMs
+  )) as {
+    artObjects?: Array<{
+      title?: string;
+      longTitle?: string;
+      principalOrFirstMaker?: string;
+      links?: {
+        web?: string;
+      };
+      webImage?: {
+        url?: string;
+        width?: number;
+        height?: number;
+      };
+    }>;
+  };
+
+  return (data.artObjects ?? [])
+    .map((object, index) => ({
+      url: parseAbsoluteUrl(object.links?.web ?? "") ?? "",
+      title: clip(object.title || object.longTitle, 220),
+      snippet: compactParts([
+        object.principalOrFirstMaker ? `Maker: ${object.principalOrFirstMaker}` : undefined,
+        object.longTitle,
+        "Rijksmuseum"
+      ]),
+      imageUrl: parseAbsoluteUrl(object.webImage?.url ?? ""),
+      imageAlt: clip(object.longTitle || object.title, 160),
+      imageWidth: object.webImage?.width,
+      imageHeight: object.webImage?.height,
+      imageCreator: clip(object.principalOrFirstMaker, 160),
+      imageCredit: "Rijksmuseum",
+      imageLicense: "Rijksmuseum collection image terms",
+      imageLicenseUrl: "https://data.rijksmuseum.nl/",
+      provider: "rijksmuseum",
+      rank: index + 1
+    }))
+    .filter((result) => result.url && result.imageUrl);
+}
+
+async function searchImageSources(
+  query: string,
+  config: RetrievalConfig,
+  notes: string[],
+  onStatus?: (message: string) => void
+): Promise<SearchResult[]> {
+  const cleanQuery = cleanImageProviderQuery(query);
+  if (!cleanQuery) {
+    return [];
+  }
+
+  const providers: Array<{
+    name: string;
+    envKeys?: string[];
+    search: (query: string, config: RetrievalConfig) => Promise<SearchResult[]>;
+  }> = [
+    { name: "Openverse", search: searchOpenverseImages },
+    { name: "Pexels", envKeys: ["PEXELS_API_KEY"], search: searchPexelsImages },
+    {
+      name: "Unsplash",
+      envKeys: ["UNSPLASH_ACCESS_KEY"],
+      search: searchUnsplashImages
+    },
+    { name: "NASA", search: searchNasaImages },
+    { name: "Library of Congress", search: searchLibraryOfCongressImages },
+    { name: "The Met", search: searchMetImages },
+    { name: "Art Institute of Chicago", search: searchArtInstituteImages },
+    {
+      name: "Rijksmuseum",
+      envKeys: ["RIJKSMUSEUM_API_KEY", "RIJKS_API_KEY"],
+      search: searchRijksmuseumImages
+    }
+  ];
+
+  const results: SearchResult[] = [];
+
+  for (const provider of providers) {
+    if (
+      provider.envKeys &&
+      !provider.envKeys.some((key) => Boolean(process.env[key]?.trim()))
+    ) {
+      notes.push(
+        `${provider.name} image search skipped: set ${provider.envKeys.join(" or ")} to enable it.`
+      );
+      continue;
+    }
+
+    try {
+      onStatus?.(`Searching ${provider.name} images for "${cleanQuery}"...`);
+      const providerResults = await provider.search(cleanQuery, config);
+      if (!providerResults.length) {
+        notes.push(`${provider.name} returned no image results.`);
+      }
+      results.push(...providerResults);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      notes.push(`${provider.name} image search failed: ${message}`);
+    }
+  }
+
+  return uniqueByUrl(
+    results.filter((result) => isDomainPermitted(result.url, config))
+  ).slice(0, Math.max(32, config.searchMaxResults * 8));
+}
+
 async function searchWeb(
   query: string,
   config: RetrievalConfig,
@@ -1082,7 +1723,7 @@ function toSearchSource(result: SearchResult): RetrievalSource {
     snippet: result.snippet,
     provider: result.provider,
     searchRank: result.rank,
-    images: result.imageUrl ? [{ url: result.imageUrl }] : [],
+    images: imageFromSearchResult(result) ? [imageFromSearchResult(result)!] : [],
     links: []
   };
 }
@@ -1112,16 +1753,40 @@ function sourceKey(url: string): string {
 function visualResultScore(result: SearchResult): number {
   const hostname = getHostname(result.url) ?? "";
   const haystack = decodeSearchText(
-    `${result.url} ${result.title ?? ""} ${result.snippet ?? ""}`
+    `${result.url} ${result.title ?? ""} ${result.snippet ?? ""} ${result.provider}`
   );
   let score = 0;
 
-  if (matchesDomain(hostname, "commons.wikimedia.org")) {
+  if (
+    [
+      "openverse",
+      "pexels",
+      "unsplash",
+      "nasa",
+      "loc",
+      "met",
+      "artic",
+      "rijksmuseum"
+    ].includes(result.provider)
+  ) {
+    score += 90;
+  } else if (matchesDomain(hostname, "commons.wikimedia.org")) {
     score += 80;
   } else if (matchesDomain(hostname, "wikimedia.org")) {
     score += 60;
   } else if (matchesDomain(hostname, "wikipedia.org")) {
     score += 35;
+  } else if (
+    matchesDomain(hostname, "openverse.org") ||
+    matchesDomain(hostname, "pexels.com") ||
+    matchesDomain(hostname, "unsplash.com") ||
+    matchesDomain(hostname, "nasa.gov") ||
+    matchesDomain(hostname, "loc.gov") ||
+    matchesDomain(hostname, "metmuseum.org") ||
+    matchesDomain(hostname, "artic.edu") ||
+    matchesDomain(hostname, "rijksmuseum.nl")
+  ) {
+    score += 70;
   } else if (matchesDomain(hostname, "flickr.com")) {
     score += 20;
   }
@@ -1184,8 +1849,8 @@ async function fetchSources(
           snippet: seeds.get(sourceKey(url))?.snippet,
           provider: seeds.get(sourceKey(url))?.provider,
           searchRank: seeds.get(sourceKey(url))?.rank,
-          images: seeds.get(sourceKey(url))?.imageUrl
-            ? [{ url: seeds.get(sourceKey(url))?.imageUrl ?? "" }]
+          images: imageFromSearchResult(seeds.get(sourceKey(url)))
+            ? [imageFromSearchResult(seeds.get(sourceKey(url)))!]
             : [],
           links: [],
           error: error instanceof Error ? error.message : String(error)
@@ -1210,6 +1875,7 @@ export async function collectRetrievalContext(
   const plannedQueries = buildSearchQueries(text);
   const searchNeeded = shouldSearch(text, options, directUrls.length > 0);
   const fetchNeeded = options.forceFetch || directUrls.length > 0;
+  const visualSearchNeeded = searchNeeded && asksForVisualResources(text);
   const notes: string[] = [];
 
   const base: RetrievalContext = {
@@ -1244,20 +1910,41 @@ export async function collectRetrievalContext(
 
   const queries: string[] = [];
   let searchResults: SearchResult[] = [];
+  const searchResultCap =
+    Math.max(config.searchMaxResults, config.fetchMaxPages) *
+    (visualSearchNeeded ? 8 : 3);
+  const prioritizedResultCap =
+    Math.max(config.searchMaxResults, config.fetchMaxPages) *
+    (visualSearchNeeded ? 6 : 2);
 
   if (searchNeeded && plannedQueries.length) {
+    if (visualSearchNeeded) {
+      queries.push(plannedQueries[0]);
+      searchResults = uniqueByUrl([
+        ...searchResults,
+        ...(await searchImageSources(
+          plannedQueries[0],
+          config,
+          notes,
+          options.onStatus
+        ))
+      ]).slice(0, searchResultCap);
+    }
+
     for (const query of plannedQueries) {
-      queries.push(query);
+      if (!queries.includes(query)) {
+        queries.push(query);
+      }
       options.onStatus?.(`Searching the web for "${query}"...`);
       searchResults = uniqueByUrl([
         ...searchResults,
         ...(await searchWeb(query, config, notes))
-      ]).slice(0, Math.max(config.searchMaxResults, config.fetchMaxPages) * 3);
+      ]).slice(0, searchResultCap);
     }
 
     searchResults = prioritizeSearchResults(searchResults, text).slice(
       0,
-      Math.max(config.searchMaxResults, config.fetchMaxPages) * 2
+      prioritizedResultCap
     );
   }
 
@@ -1306,7 +1993,9 @@ export async function collectRetrievalContext(
 function formatImages(images: RetrievedImage[]): string[] {
   return images.slice(0, 6).map((image) => {
     const alt = image.alt ? ` (${image.alt})` : "";
-    return `  - ${image.url}${alt}`;
+    const credit = image.credit ? `, ${image.credit}` : "";
+    const license = image.license ? `, ${image.license}` : "";
+    return `  - ${image.url}${alt}${credit}${license}`;
   });
 }
 
@@ -1483,7 +2172,10 @@ function formatVerifiedImages(images: VerifiedImage[]): string[] {
     const alt = image.alt ? ` (${image.alt})` : "";
     const sourceTitle = image.sourceTitle ? `, ${image.sourceTitle}` : "";
     const contentType = image.contentType ? `, ${image.contentType}` : "";
-    return `  - ${image.url}${alt} [source ${image.sourceId}${sourceTitle}${contentType}]`;
+    const credit = image.credit ? `, ${image.credit}` : "";
+    const license = image.license ? `, ${image.license}` : "";
+    const licenseUrl = image.licenseUrl ? `, license: ${image.licenseUrl}` : "";
+    return `  - ${image.url}${alt} [source ${image.sourceId}${sourceTitle}${contentType}${credit}${license}${licenseUrl}]`;
   });
 }
 
@@ -1516,6 +2208,23 @@ function imageUrlVariants(url: string): string[] {
   return uniqueStrings([wikimediaOriginalImageUrl(url) ?? "", url]);
 }
 
+function uniqueVerifiedImages(images: VerifiedImage[]): VerifiedImage[] {
+  const seen = new Set<string>();
+  const unique: VerifiedImage[] = [];
+
+  for (const image of images) {
+    const key = imageDedupeKey(image.url);
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    unique.push(image);
+  }
+
+  return unique;
+}
+
 function responseLooksLikeImage(response: globalThis.Response): {
   ok: boolean;
   contentType?: string;
@@ -1527,16 +2236,33 @@ function responseLooksLikeImage(response: globalThis.Response): {
   };
 }
 
+function imageRequestReferer(url: string): string | undefined {
+  const hostname = getHostname(url);
+  if (!hostname) {
+    return undefined;
+  }
+
+  if (matchesDomain(hostname, "artic.edu")) {
+    return "https://www.artic.edu/";
+  }
+
+  return undefined;
+}
+
 async function validateImageUrl(
   url: string,
   config: RetrievalConfig
 ): Promise<{ url: string; contentType?: string } | null> {
   await assertPublicUrl(url, config);
 
-  const headers = {
+  const headers: Record<string, string> = {
     Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
     "User-Agent": IMAGE_USER_AGENT
   };
+  const referer = imageRequestReferer(url);
+  if (referer) {
+    headers.Referer = referer;
+  }
   const timeoutMs = Math.min(config.timeoutMs, 8_000);
 
   try {
@@ -1603,7 +2329,7 @@ async function verifyImageCandidates(
   notes: string[],
   onStatus?: (message: string) => void
 ): Promise<VerifiedImage[]> {
-  const candidates = collectImageCandidates(sources, queries).slice(0, 32);
+  const candidates = collectImageCandidates(sources, queries).slice(0, 56);
   if (!candidates.length) {
     return [];
   }
@@ -1643,9 +2369,9 @@ async function verifyImageCandidates(
     notes.push(`Image verification rejected ${rejected} non-loadable candidate URLs.`);
   }
 
-  return verified
-    .filter((image): image is VerifiedImage => image !== null)
-    .slice(0, 12);
+  return uniqueVerifiedImages(
+    verified.filter((image): image is VerifiedImage => image !== null)
+  ).slice(0, 18);
 }
 
 function sourcesWithVerifiedImages(
@@ -1659,7 +2385,11 @@ function sourcesWithVerifiedImages(
       url: image.url,
       alt: image.alt,
       width: image.width,
-      height: image.height
+      height: image.height,
+      creator: image.creator,
+      credit: image.credit,
+      license: image.license,
+      licenseUrl: image.licenseUrl
     });
     bySource.set(image.sourceId, images);
   }

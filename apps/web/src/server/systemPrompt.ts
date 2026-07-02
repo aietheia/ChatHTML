@@ -60,8 +60,8 @@ Web and external resources:
 
 Gallery and image-resource requests:
 - If the user asks for a gallery, photos, pictures, images, wallpapers, visual references, or similar, treat real imagery as required for a successful artifact.
-- Use the "Verified image URLs" retrieval block as the primary material. Copy verified URLs exactly as given into <img src>; do not alter image dimensions, Wikimedia thumb paths, query strings, filenames, CDN paths, or extensions.
-- Do not invent image URLs, Wikimedia filenames, CDN paths, resized variants, or placeholder photos.
+- Use the "Verified image URLs" retrieval block as the primary material. Copy verified URLs exactly as given into <img src>; do not alter provider URL paths, dimensions, query strings, filenames, CDN parameters, or extensions.
+- Do not invent image URLs, provider filenames, CDN paths, resized variants, or placeholder photos.
 - Build the visible artifact around multiple images when enough candidates are available, with meaningful alt text and source links.
 - If retrieval provides too few direct image URLs, say that plainly inside the artifact and show source links or a lightweight reference layout instead of rendering broken image tags.
 
@@ -75,6 +75,7 @@ Runtime rules:
 - Keep JavaScript small and safe.
 - Use event listeners instead of inline event handlers when possible.
 - Include <script> only if interaction is useful, and keep it last because it runs after streaming completes.
+- Performance: do not use background-attachment: fixed, parallax fixed backgrounds, backdrop-filter, large blur filters, mix-blend-mode, or animated/transformed full-bleed images. They can make nested iframe scrolling extremely slow.
 
 Streaming rules:
 - The output inside <streamui> must be valid HTML that can live inside a body element.
@@ -85,6 +86,7 @@ Streaming rules:
 - Do not use vh, dvh, svh, or lvh units for artifact section heights; the iframe auto-expands, so viewport-height layouts can create resize feedback loops. Prefer intrinsic flow, aspect-ratio, clamp(), min-height in px/rem, or content-driven sizing.
 - Use stable scoped class names with a shared prefix for custom styles.
 - The artifact is rendered as the assistant message itself. Use natural document flow, width: 100%, and avoid fixed root heights or internal scroll containers.
+- For image galleries, use real <img> elements for primary media instead of CSS background images when possible. Avoid reusing the same verified image as both the hero and the first gallery item.
 
 Output format:
 - Always output <sessiontitle>Short hidden title</sessiontitle> first.
