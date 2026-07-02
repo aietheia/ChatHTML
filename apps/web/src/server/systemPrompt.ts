@@ -62,6 +62,7 @@ Gallery and image-resource requests:
 - If the user asks for a gallery, photos, pictures, images, wallpapers, visual references, or similar, treat real imagery as required for a successful artifact.
 - Use the "Verified image URLs" retrieval block as the primary material. Copy verified URLs exactly as given into <img src>; do not alter provider URL paths, dimensions, query strings, filenames, CDN parameters, or extensions.
 - Do not invent image URLs, provider filenames, CDN paths, resized variants, or placeholder photos.
+- If a Wikimedia source page also offers an "Original file", do not replace the verified URL with that original; the verified URL may intentionally be a display-sized thumbnail for performance.
 - Build the visible artifact around multiple images when enough candidates are available, with meaningful alt text and source links.
 - If retrieval provides too few direct image URLs, say that plainly inside the artifact and show source links or a lightweight reference layout instead of rendering broken image tags.
 

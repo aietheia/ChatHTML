@@ -2179,6 +2179,8 @@ function formatVerifiedImages(images: VerifiedImage[]): string[] {
   });
 }
 
+const WIKIMEDIA_DISPLAY_IMAGE_WIDTH = 1280;
+
 function wikimediaOriginalImageUrl(url: string): string | undefined {
   try {
     const parsed = new URL(url);
@@ -2204,8 +2206,31 @@ function wikimediaOriginalImageUrl(url: string): string | undefined {
   }
 }
 
+function wikimediaDisplayImageUrl(url: string): string | undefined {
+  try {
+    const originalUrl = wikimediaOriginalImageUrl(url) ?? url;
+    const parsed = new URL(originalUrl);
+    if (!matchesDomain(parsed.hostname.toLowerCase(), "upload.wikimedia.org")) {
+      return undefined;
+    }
+
+    const match = parsed.pathname.match(/^(\/wikipedia\/[^/]+\/)(.+)$/);
+    const filename = parsed.pathname.split("/").filter(Boolean).pop();
+    if (!match || !filename || /\.svg$/i.test(filename)) {
+      return undefined;
+    }
+
+    parsed.pathname = `${match[1]}thumb/${match[2]}/${WIKIMEDIA_DISPLAY_IMAGE_WIDTH}px-${filename}`;
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
 function imageUrlVariants(url: string): string[] {
-  return uniqueStrings([wikimediaOriginalImageUrl(url) ?? "", url]);
+  return uniqueStrings([wikimediaDisplayImageUrl(url) ?? "", url]);
 }
 
 function uniqueVerifiedImages(images: VerifiedImage[]): VerifiedImage[] {

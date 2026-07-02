@@ -20,6 +20,8 @@ type CompletionOptions = {
   allowPartialStyles?: boolean;
 };
 
+const WIKIMEDIA_DISPLAY_IMAGE_WIDTH = 1280;
+
 function removeBrokenTrailingTag(input: string): string {
   const lastLt = input.lastIndexOf("<");
   const lastGt = input.lastIndexOf(">");
@@ -56,6 +58,65 @@ function stripUnsafeInlineAttributes(input: string): string {
       /\s+(href|src|xlink:href)\s*=\s*(["'])\s*javascript:[\s\S]*?\2/gi,
       " $1=\"#\""
     );
+}
+
+function wikimediaOriginalImageUrl(url: string): string | undefined {
+  try {
+    const parsed = new URL(url);
+    if (
+      !parsed.hostname.toLowerCase().endsWith("upload.wikimedia.org") ||
+      !parsed.pathname.includes("/thumb/")
+    ) {
+      return undefined;
+    }
+
+    const withoutThumb = parsed.pathname.replace("/thumb/", "/");
+    const lastSlash = withoutThumb.lastIndexOf("/");
+    if (lastSlash <= 0) {
+      return undefined;
+    }
+
+    parsed.pathname = withoutThumb.slice(0, lastSlash);
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function wikimediaDisplayImageUrl(url: string): string | undefined {
+  try {
+    const originalUrl = wikimediaOriginalImageUrl(url) ?? url;
+    const parsed = new URL(originalUrl);
+    if (!parsed.hostname.toLowerCase().endsWith("upload.wikimedia.org")) {
+      return undefined;
+    }
+
+    const match = parsed.pathname.match(/^(\/wikipedia\/[^/]+\/)(.+)$/);
+    const filename = parsed.pathname.split("/").filter(Boolean).pop();
+    if (!match || !filename || /\.svg$/i.test(filename)) {
+      return undefined;
+    }
+
+    parsed.pathname = `${match[1]}thumb/${match[2]}/${WIKIMEDIA_DISPLAY_IMAGE_WIDTH}px-${filename}`;
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function optimizeWikimediaImageUrl(url: string): string {
+  return wikimediaDisplayImageUrl(url) ?? url;
+}
+
+function optimizeWikimediaImageUrls(input: string): string {
+  return input.replace(
+    /https:\/\/upload\.wikimedia\.org\/[^\s"'()<>]+/gi,
+    (url) => optimizeWikimediaImageUrl(url)
+  );
 }
 
 function stabilizeViewportHeightUnits(input: string): string {
@@ -185,8 +246,9 @@ export function completePartialHtml(
   const withoutBrokenTail = removeBrokenTrailingTag(input);
   const withoutScripts = stripScriptBlocks(withoutBrokenTail, allowScripts);
   const withoutUnsafeAttributes = stripUnsafeInlineAttributes(withoutScripts);
+  const withOptimizedImages = optimizeWikimediaImageUrls(withoutUnsafeAttributes);
   const withStableViewportUnits = stabilizeViewportHeightUnits(
-    withoutUnsafeAttributes
+    withOptimizedImages
   );
   const withClosedStyle = closeIncompleteStyleBlock(
     withStableViewportUnits,
