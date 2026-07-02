@@ -43,6 +43,18 @@ The root script delegates to `@streamui/web`. The Vite app runs at `http://127.0
 
 The browser calls the local backend at `POST /api/chat`; the backend reads `OPENROUTER_API_KEY` from `.env` and forwards the request through Vercel AI SDK. The API key is never sent to the browser. The backend streams newline-delimited JSON events with separate `reasoning` and `content` chunks.
 
+## Session Storage
+
+Chat sessions are stored as one shared global state in SQLite. By default the backend writes to `sessions/state.sqlite`. Existing `sessions/state.json` data is migrated into SQLite the first time the database is empty.
+
+For production, set `STREAMUI_SESSION_DB` to a path on a persistent disk or volume, for example:
+
+```bash
+STREAMUI_SESSION_DB=/data/streamui/state.sqlite
+```
+
+If the SQLite file lives in an ephemeral deploy directory, sessions will still disappear after an instance restart or redeploy.
+
 You can also run workspace scripts directly:
 
 ```bash

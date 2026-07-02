@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -38,8 +39,15 @@ const sessionsDir = path.resolve(
   process.env.STREAMUI_SESSION_DIR || path.join(workspaceRoot, "sessions")
 );
 const stateFile = path.join(sessionsDir, "state.json");
+const sqliteFile = path.resolve(
+  process.env.STREAMUI_SESSION_DB ||
+    process.env.STREAMUI_SQLITE_PATH ||
+    path.join(sessionsDir, "state.sqlite")
+);
+const SESSION_STATE_KEY = "global";
 
 let saveQueue = Promise.resolve();
+let database: DatabaseSync | null = null;
 
 function now(): number {
   return Date.now();
@@ -168,12 +176,10 @@ function normalizeState(input: unknown): StoredSessionState {
 }
 
 async function ensureSessionsDir(): Promise<void> {
-  await mkdir(sessionsDir, { recursive: true, mode: 0o700 });
+  await mkdir(path.dirname(sqliteFile), { recursive: true, mode: 0o700 });
 }
 
-async function readSessionState(): Promise<StoredSessionState> {
-  await ensureSessionsDir();
-
+async function readLegacyJsonState(): Promise<StoredSessionState | null> {
   try {
     const raw = await readFile(stateFile, "utf8");
     return normalizeState(JSON.parse(raw));
@@ -183,25 +189,81 @@ async function readSessionState(): Promise<StoredSessionState> {
       console.warn("Could not read StreamUI sessions.", error);
     }
 
-    const state = createEmptyState();
-    await writeSessionState(state);
-    return state;
+    return null;
   }
+}
+
+function getDatabase(): DatabaseSync {
+  if (database) {
+    return database;
+  }
+
+  database = new DatabaseSync(sqliteFile);
+  database.exec("PRAGMA busy_timeout = 5000");
+  database.exec("PRAGMA journal_mode = WAL");
+  database.exec("PRAGMA synchronous = NORMAL");
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS streamui_state (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+
+  return database;
+}
+
+function readSqliteState(db: DatabaseSync): StoredSessionState | null {
+  const row = db
+    .prepare("SELECT value FROM streamui_state WHERE key = ?")
+    .get(SESSION_STATE_KEY) as { value?: unknown } | undefined;
+
+  if (typeof row?.value !== "string") {
+    return null;
+  }
+
+  return normalizeState(JSON.parse(row.value));
+}
+
+function writeSqliteState(db: DatabaseSync, state: StoredSessionState): void {
+  const normalized = normalizeState(state);
+  db.prepare(
+    `
+      INSERT INTO streamui_state (key, value, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET
+        value = excluded.value,
+        updated_at = excluded.updated_at
+    `
+  ).run(
+    SESSION_STATE_KEY,
+    JSON.stringify(normalized),
+    now()
+  );
+}
+
+async function readSessionState(): Promise<StoredSessionState> {
+  await ensureSessionsDir();
+  const db = getDatabase();
+
+  try {
+    const sqliteState = readSqliteState(db);
+    if (sqliteState) {
+      return sqliteState;
+    }
+  } catch (error) {
+    console.warn("Could not read StreamUI SQLite sessions.", error);
+  }
+
+  const legacyState = await readLegacyJsonState();
+  const state = legacyState ?? createEmptyState();
+  writeSqliteState(db, state);
+  return state;
 }
 
 async function writeSessionState(state: StoredSessionState): Promise<void> {
   await ensureSessionsDir();
-  const normalized = normalizeState(state);
-  const tmpFile = path.join(
-    sessionsDir,
-    `.state.${process.pid}.${Date.now()}.tmp`
-  );
-
-  await writeFile(tmpFile, `${JSON.stringify(normalized, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600
-  });
-  await rename(tmpFile, stateFile);
+  writeSqliteState(getDatabase(), state);
 }
 
 export async function handleGetSessions(
