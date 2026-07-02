@@ -1,4 +1,4 @@
-import html2canvas from "html2canvas";
+import { toBlob } from "html-to-image";
 import type { RenderSnapshot } from "./types";
 
 const MAX_CANVAS_DIMENSION = 16_384;
@@ -87,16 +87,28 @@ function downloadBlob(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
-function toPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) {
-        resolve(blob);
-        return;
-      }
-      reject(new Error("Could not encode the PNG export."));
-    }, "image/png");
-  });
+function shouldExportNode(node: HTMLElement): boolean {
+  if (node.tagName.toLowerCase() === "script") {
+    return false;
+  }
+
+  const sourceText = [
+    node.id,
+    node.className,
+    node.getAttribute("src"),
+    node.getAttribute("href")
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return !(
+    sourceText.includes("zotero") ||
+    sourceText.includes("safari-web-extension:") ||
+    sourceText.includes("moz-extension:") ||
+    sourceText.includes("chrome-extension:") ||
+    sourceText.includes("extension://")
+  );
 }
 
 export async function downloadSnapshotAsPng(
@@ -107,6 +119,7 @@ export async function downloadSnapshotAsPng(
   }
 ): Promise<void> {
   const frame = document.createElement("iframe");
+  frame.sandbox.add("allow-scripts");
   frame.sandbox.add("allow-same-origin");
   frame.style.position = "fixed";
   frame.style.left = "-100000px";
@@ -137,20 +150,21 @@ export async function downloadSnapshotAsPng(
     const { width, height } = measureDocument(frameDocument);
     frame.style.height = `${height}px`;
 
-    const canvas = await html2canvas(frameDocument.body, {
-      allowTaint: false,
-      backgroundColor: null,
+    const blob = await toBlob(frameDocument.body, {
+      cacheBust: true,
+      canvasHeight: height,
+      canvasWidth: width,
+      filter: shouldExportNode,
       height,
-      logging: false,
-      scale: getExportScale(width, height),
-      scrollX: 0,
-      scrollY: 0,
-      useCORS: true,
+      pixelRatio: getExportScale(width, height),
+      skipAutoScale: true,
       width,
-      windowHeight: height,
-      windowWidth: width
     });
-    const blob = await toPngBlob(canvas);
+
+    if (!blob) {
+      throw new Error("Could not encode the PNG export.");
+    }
+
     downloadBlob(blob, options.filename);
   } finally {
     frame.remove();
