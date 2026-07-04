@@ -18,6 +18,7 @@ export type ApiSettings = {
   apiKey: string;
   model: string;
   reasoningEffort: ReasoningEffort;
+  userPreference: string;
 };
 
 export type ApiProviderPreset = {
@@ -29,6 +30,7 @@ export type ApiProviderPreset = {
 };
 
 export const API_SETTINGS_STORAGE_KEY = "streamui.apiSettings.v1";
+export const MAX_USER_PREFERENCE_LENGTH = 4_000;
 
 export const API_PROVIDER_PRESETS: ApiProviderPreset[] = [
   {
@@ -90,7 +92,8 @@ export const DEFAULT_API_SETTINGS: ApiSettings = {
   apiKeySource: "environment",
   apiKey: "",
   model: DEFAULT_PRESET.model,
-  reasoningEffort: DEFAULT_PRESET.reasoningEffort
+  reasoningEffort: DEFAULT_PRESET.reasoningEffort,
+  userPreference: ""
 };
 
 function isProviderId(value: unknown): value is ApiProviderId {
@@ -137,7 +140,11 @@ export function normalizeApiSettings(input: unknown): ApiSettings {
     model: typeof object.model === "string" ? object.model.trim() : preset.model,
     reasoningEffort: isReasoningEffort(object.reasoningEffort)
       ? object.reasoningEffort
-      : preset.reasoningEffort
+      : preset.reasoningEffort,
+    userPreference:
+      typeof object.userPreference === "string"
+        ? object.userPreference.slice(0, MAX_USER_PREFERENCE_LENGTH)
+        : ""
   };
 }
 
@@ -170,7 +177,8 @@ export function serializeApiSettings(settings: ApiSettings): ApiSettings {
   const normalized = normalizeApiSettings(settings);
   return {
     ...normalized,
-    apiKey: normalized.apiKeySource === "manual" ? normalized.apiKey : ""
+    apiKey: normalized.apiKeySource === "manual" ? normalized.apiKey : "",
+    userPreference: normalized.userPreference.trim()
   };
 }
 

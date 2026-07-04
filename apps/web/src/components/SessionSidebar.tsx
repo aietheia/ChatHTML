@@ -9,11 +9,13 @@ import {
   SquarePen,
   Sun,
   Trash2,
+  UserRound,
   X
 } from "lucide-react";
 import {
   API_KEY_SOURCE_OPTIONS,
   API_PROVIDER_PRESETS,
+  MAX_USER_PREFERENCE_LENGTH,
   REASONING_EFFORT_OPTIONS,
   getProviderPreset,
   getApiKeyEnvironmentName,
@@ -41,6 +43,8 @@ export type SessionListItem = {
   id: string;
   title: string;
 };
+
+type SettingsSection = "api" | "preferences" | "search";
 
 type SessionSidebarProps = {
   sessions: SessionListItem[];
@@ -72,7 +76,8 @@ export function SessionSidebar({
   onSearchSettingsChange
 }: SessionSidebarProps) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<"api" | "search">("api");
+  const [settingsSection, setSettingsSection] =
+    useState<SettingsSection>("api");
   const [draftApiSettings, setDraftApiSettings] =
     useState<ApiSettings>(apiSettings);
   const [draftSearchSettings, setDraftSearchSettings] =
@@ -276,6 +281,16 @@ export function SessionSidebar({
               </button>
               <button
                 className={`settings-nav-item ${
+                  settingsSection === "preferences" ? "is-active" : ""
+                }`}
+                type="button"
+                onClick={() => setSettingsSection("preferences")}
+              >
+                <UserRound size={18} strokeWidth={2.1} aria-hidden="true" />
+                <span>用户偏好</span>
+              </button>
+              <button
+                className={`settings-nav-item ${
                   settingsSection === "search" ? "is-active" : ""
                 }`}
                 type="button"
@@ -289,7 +304,11 @@ export function SessionSidebar({
             <div className="settings-content">
               <header className="settings-content-header">
                 <h2 id="settings-panel-title">
-                  {settingsSection === "api" ? "API" : "Web Search"}
+                  {settingsSection === "api"
+                    ? "API"
+                    : settingsSection === "preferences"
+                      ? "用户偏好"
+                      : "Web Search"}
                 </h2>
               </header>
 
@@ -405,7 +424,22 @@ export function SessionSidebar({
                         ))}
                       </select>
                     </label>
+
                   </>
+                ) : settingsSection === "preferences" ? (
+                  <label className="settings-row settings-row-textarea">
+                    <span>用户偏好</span>
+                    <textarea
+                      value={draftApiSettings.userPreference}
+                      maxLength={MAX_USER_PREFERENCE_LENGTH}
+                      rows={4}
+                      placeholder="希望模型用什么语气或风格回复"
+                      spellCheck={false}
+                      onChange={(event) =>
+                        updateApiDraft({ userPreference: event.target.value })
+                      }
+                    />
+                  </label>
                 ) : (
                   <>
                     <label className="settings-row">

@@ -6,6 +6,7 @@ import { SYSTEM_PROMPT } from "./systemPrompt.js";
 
 const MAX_IMAGES_PER_MESSAGE = 4;
 const MAX_IMAGE_DATA_URL_LENGTH = 3_000_000;
+const MAX_USER_PREFERENCE_LENGTH = 4_000;
 
 type ChatRole = "user" | "assistant" | "system";
 type OpenRouterReasoningEffort =
@@ -25,6 +26,7 @@ type RuntimeApiSettings = {
   apiKey: string;
   model: string;
   reasoningEffort: OpenRouterReasoningEffort;
+  userPreference: string;
 };
 
 type ClientImageAttachment = {
@@ -143,6 +145,25 @@ function normalizeThemeMode(input: unknown): PageThemeMode {
   }
 
   return "night";
+}
+
+function normalizeUserPreference(input: unknown): string {
+  if (typeof input !== "string") {
+    return "";
+  }
+
+  return input.trim().slice(0, MAX_USER_PREFERENCE_LENGTH);
+}
+
+function buildUserPreferencePrompt(userPreference: string): string {
+  if (!userPreference) {
+    return "";
+  }
+
+  return `用户偏好:
+The following text is persistent user-provided guidance. Follow it when relevant unless it conflicts with higher-priority instructions.
+
+${userPreference}`;
 }
 
 function buildThemeContextPrompt(themeMode: PageThemeMode): string {
@@ -411,7 +432,8 @@ function readRuntimeApiSettings(input: unknown): RuntimeApiSettings {
     apiKeyEnvironmentName,
     apiKey,
     model,
-    reasoningEffort: normalizeReasoningEffort(object.reasoningEffort)
+    reasoningEffort: normalizeReasoningEffort(object.reasoningEffort),
+    userPreference: normalizeUserPreference(object.userPreference)
   };
 }
 
@@ -584,10 +606,13 @@ export async function handleOpenRouterChat(
       ),
       system: [
         SYSTEM_PROMPT,
+        buildUserPreferencePrompt(apiSettings.userPreference),
         buildThemeContextPrompt(themeMode),
         buildCanvasContextPrompt(canvasContext),
         buildAgentLoopPrompt(agentLoop)
-      ].join("\n\n"),
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
       messages: messages.map(toModelMessage)
     });
 
