@@ -36,53 +36,40 @@ import {
   serializeSearchSettings,
   type SearchSettings
 } from "./core/searchSettings";
-import { createStreamingRenderer } from "./core/createStreamingRenderer";
-import { extractStreamUiParts } from "./core/extractStreamUiParts";
+import {
+  countUserPrompts,
+  createEmptySession,
+  createId,
+  createInitialSessionState,
+  hasPersistedMessages,
+  initialMessages,
+  normalizeStoredSession,
+  normalizeStoredSessionState,
+  serializeSessions,
+  sortSessions,
+  summarizeSession,
+  type ChatSession,
+  type ClientMessage,
+  type SessionState
+} from "./domain/chat/sessionModel";
+import { toApiMessages } from "./features/chat/apiMessages";
 import type { ImageAttachment } from "./core/imageAttachments";
-import type { RenderError, RenderSnapshot, StreamingRenderer } from "./core/types";
-
-type ClientMessage = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  attachments?: ImageAttachment[];
-  reasoning?: string;
-  sessionTitle?: string;
-  rawStream?: string;
-  hasStreamUi?: boolean;
-  streamUiComplete?: boolean;
-  snapshot?: RenderSnapshot;
-  status?: "streaming" | "complete" | "error";
-  error?: string;
-};
-
-type ChatSession = {
-  id: string;
-  title: string;
-  createdAt: number;
-  updatedAt: number;
-  messages: ClientMessage[];
-};
-
-type SessionState = {
-  sessions: ChatSession[];
-  activeSessionId: string;
-};
+import { extractStreamUiParts } from "./runtime/streamui/protocol";
+import { createStreamingRenderer } from "./runtime/streamui/streamingRenderer";
+import type {
+  RenderError,
+  RenderSnapshot,
+  StreamingRenderer
+} from "./runtime/streamui/types";
 
 type ChatStreamEvent = {
   type?: "content" | "reasoning";
   text?: string;
 };
 
-const initialMessages: ClientMessage[] = [];
 const LEGACY_SESSION_STORAGE_KEY = "streamui.sessions.v1";
 const LEGACY_ACTIVE_SESSION_STORAGE_KEY = "streamui.activeSession.v1";
 const THEME_STORAGE_KEY = "streamui.theme.v1";
-const UNTITLED_SESSION = "New Session";
-
-function createId(prefix: string): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
 
 function loadThemeMode(): ThemeMode {
   if (typeof window === "undefined") {
@@ -92,227 +79,6 @@ function loadThemeMode(): ThemeMode {
   return window.localStorage.getItem(THEME_STORAGE_KEY) === "day"
     ? "day"
     : "night";
-}
-
-function createEmptySession(): ChatSession {
-  const now = Date.now();
-
-  return {
-    id: createId("session"),
-    title: UNTITLED_SESSION,
-    createdAt: now,
-    updatedAt: now,
-    messages: initialMessages
-  };
-}
-
-function createInitialSessionState(): SessionState {
-  const session = createEmptySession();
-  return { sessions: [session], activeSessionId: session.id };
-}
-
-function compactText(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
-}
-
-function titleFromText(value: string): string {
-  const compact = compactText(value);
-  if (!compact) {
-    return UNTITLED_SESSION;
-  }
-
-  const withoutProtocol = compact
-    .replace(/\b(sessiontitle|chat|streamui)\b/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  const firstSentence = withoutProtocol.split(/(?<=[.!?。！？])\s+/u)[0] ?? withoutProtocol;
-  const words = firstSentence.split(/\s+/).filter(Boolean);
-  const shortTitle =
-    words.length > 7 ? words.slice(0, 7).join(" ") : firstSentence;
-
-  if (shortTitle.length <= 58) {
-    return shortTitle;
-  }
-
-  return `${shortTitle.slice(0, 57).trimEnd()}…`;
-}
-
-function assistantMessageToSessionTitle(message: ClientMessage): string {
-  if (message.role !== "assistant") {
-    return "";
-  }
-
-  if (message.sessionTitle?.trim()) {
-    return message.sessionTitle;
-  }
-
-  if (message.rawStream) {
-    const parts = extractStreamUiParts(message.rawStream);
-    if (parts.sessionTitleComplete && parts.sessionTitle.trim()) {
-      return parts.sessionTitle;
-    }
-  }
-
-  return "";
-}
-
-function summarizeSession(messages: ClientMessage[]): string {
-  const explicitTitle = messages
-    .map(assistantMessageToSessionTitle)
-    .find((text) => text.trim());
-  if (explicitTitle) {
-    return titleFromText(explicitTitle);
-  }
-
-  const firstUserMessage = messages.find((message) => message.role === "user");
-  if (!firstUserMessage) {
-    return UNTITLED_SESSION;
-  }
-
-  if (firstUserMessage.content.trim()) {
-    return titleFromText(firstUserMessage.content);
-  }
-
-  if (firstUserMessage.attachments?.length) {
-    return "Image conversation";
-  }
-
-  return UNTITLED_SESSION;
-}
-
-function countUserPrompts(messages: ClientMessage[]): number {
-  return messages.filter((message) => message.role === "user").length;
-}
-
-function rebuildAssistantSnapshot(message: ClientMessage): ClientMessage {
-  if (message.role !== "assistant" || !message.rawStream) {
-    return message;
-  }
-
-  const parts = extractStreamUiParts(message.rawStream);
-  if (!parts.hasStreamUi || !parts.streamui.trim()) {
-    return {
-      ...message,
-      status: message.status === "streaming" ? "complete" : message.status
-    };
-  }
-
-  const renderer = createStreamingRenderer();
-  renderer.feed(parts.streamui);
-  renderer.complete();
-
-  return {
-    ...message,
-    snapshot: renderer.getSnapshot(),
-    hasStreamUi: true,
-    streamUiComplete: parts.streamUiComplete,
-    status: message.status === "streaming" ? "complete" : message.status
-  };
-}
-
-function normalizeStoredMessage(message: unknown): ClientMessage | null {
-  if (!message || typeof message !== "object") {
-    return null;
-  }
-
-  const input = message as Partial<ClientMessage>;
-  if (
-    typeof input.id !== "string" ||
-    (input.role !== "user" && input.role !== "assistant")
-  ) {
-    return null;
-  }
-
-  return rebuildAssistantSnapshot({
-    id: input.id,
-    role: input.role,
-    content: typeof input.content === "string" ? input.content : "",
-    attachments: Array.isArray(input.attachments) ? input.attachments : undefined,
-    reasoning: typeof input.reasoning === "string" ? input.reasoning : undefined,
-    sessionTitle:
-      typeof input.sessionTitle === "string" ? input.sessionTitle : undefined,
-    rawStream: typeof input.rawStream === "string" ? input.rawStream : undefined,
-    hasStreamUi: Boolean(input.hasStreamUi),
-    streamUiComplete: Boolean(input.streamUiComplete),
-    status:
-      input.status === "streaming"
-        ? "complete"
-        : input.status === "complete" || input.status === "error"
-          ? input.status
-          : input.role === "assistant"
-            ? "complete"
-            : undefined,
-    error: typeof input.error === "string" ? input.error : undefined
-  });
-}
-
-function normalizeStoredSession(session: unknown): ChatSession | null {
-  if (!session || typeof session !== "object") {
-    return null;
-  }
-
-  const input = session as Partial<ChatSession>;
-  if (typeof input.id !== "string") {
-    return null;
-  }
-
-  const messages = Array.isArray(input.messages)
-    ? input.messages
-        .map(normalizeStoredMessage)
-        .filter((message): message is ClientMessage => message !== null)
-    : [];
-  const now = Date.now();
-  const createdAt =
-    typeof input.createdAt === "number" && Number.isFinite(input.createdAt)
-      ? input.createdAt
-      : now;
-  const updatedAt =
-    typeof input.updatedAt === "number" && Number.isFinite(input.updatedAt)
-      ? input.updatedAt
-      : createdAt;
-  const summarizedTitle = summarizeSession(messages);
-
-  return {
-    id: input.id,
-    title:
-      summarizedTitle !== UNTITLED_SESSION
-        ? summarizedTitle
-        : typeof input.title === "string" && input.title.trim()
-        ? input.title.trim()
-        : UNTITLED_SESSION,
-    createdAt,
-    updatedAt,
-    messages
-  };
-}
-
-function normalizeStoredSessionState(input: unknown): SessionState {
-  if (!input || typeof input !== "object") {
-    return createInitialSessionState();
-  }
-
-  const state = input as Partial<SessionState>;
-  const sessions = Array.isArray(state.sessions)
-    ? state.sessions
-        .map(normalizeStoredSession)
-        .filter((session): session is ChatSession => session !== null)
-    : [];
-
-  if (!sessions.length) {
-    return createInitialSessionState();
-  }
-
-  const sorted = sortSessions(sessions);
-  const activeSessionId =
-    typeof state.activeSessionId === "string" &&
-    sorted.some((session) => session.id === state.activeSessionId)
-      ? state.activeSessionId
-      : sorted[0].id;
-
-  return {
-    sessions: sorted,
-    activeSessionId
-  };
 }
 
 function loadLegacyLocalSessionState(): SessionState | null {
@@ -348,10 +114,6 @@ function loadLegacyLocalSessionState(): SessionState | null {
   }
 }
 
-function hasPersistedMessages(state: SessionState): boolean {
-  return state.sessions.some((session) => session.messages.length > 0);
-}
-
 function clearLegacyLocalSessions(): void {
   if (typeof window === "undefined") {
     return;
@@ -359,89 +121,6 @@ function clearLegacyLocalSessions(): void {
 
   window.localStorage.removeItem(LEGACY_SESSION_STORAGE_KEY);
   window.localStorage.removeItem(LEGACY_ACTIVE_SESSION_STORAGE_KEY);
-}
-
-function serializeMessage(message: ClientMessage): Omit<ClientMessage, "snapshot"> {
-  const { snapshot: _snapshot, ...serializable } = message;
-  return {
-    ...serializable,
-    status: serializable.status === "streaming" ? "complete" : serializable.status
-  };
-}
-
-function serializeSessions(sessions: ChatSession[]) {
-  return sessions.map((session) => ({
-    ...session,
-    messages: session.messages.map(serializeMessage)
-  }));
-}
-
-function sortSessions(sessions: ChatSession[]): ChatSession[] {
-  return [...sessions].sort((a, b) => b.updatedAt - a.updatedAt);
-}
-
-function decodeHtmlEntities(value: string): string {
-  if (typeof document === "undefined") {
-    return value;
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.innerHTML = value;
-  return textarea.value;
-}
-
-function htmlToTranscriptText(html: string): string {
-  return decodeHtmlEntities(
-    html
-      .replace(/<script[\s\S]*?<\/script>/gi, " ")
-      .replace(/<style[\s\S]*?<\/style>/gi, " ")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-  );
-}
-
-function getApiMessageContent(message: ClientMessage): string {
-  const visibleContent = message.content.trim();
-  if (visibleContent) {
-    return visibleContent;
-  }
-
-  if (message.role !== "assistant" || !message.rawStream) {
-    return message.content;
-  }
-
-  const parts = extractStreamUiParts(message.rawStream);
-  const artifactText = htmlToTranscriptText(parts.streamui || parts.fallbackText);
-  if (!artifactText) {
-    return "[Assistant produced a StreamUI artifact for this turn.]";
-  }
-
-  return `[Assistant produced a StreamUI artifact for this turn. Text summary: ${artifactText.slice(
-    0,
-    4_000
-  )}]`;
-}
-
-function toApiMessages(messages: ClientMessage[]) {
-  return messages
-    .filter((message) => message.id !== "welcome")
-    .filter(
-      (message) =>
-        message.role === "user" ||
-        getApiMessageContent(message).trim() ||
-        (message.attachments?.length ?? 0) > 0
-    )
-    .map((message) => ({
-      role: message.role,
-      content: getApiMessageContent(message),
-      images: message.attachments?.map((attachment) => ({
-        name: attachment.name,
-        mimeType: attachment.mimeType,
-        size: attachment.size,
-        dataUrl: attachment.dataUrl
-      }))
-    }));
 }
 
 function getCanvasContext() {

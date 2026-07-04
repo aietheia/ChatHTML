@@ -363,21 +363,6 @@ button {
   box-shadow: none;
 }
 
-.api-settings-dot {
-  position: absolute;
-  right: 7px;
-  bottom: 7px;
-  width: 7px;
-  height: 7px;
-  border: 1.5px solid #ffffff;
-  border-radius: 999px;
-  background: #f04438;
-}
-
-.api-settings-button.is-configured .api-settings-dot {
-  background: #12b76a;
-}
-
 .settings-overlay {
   position: fixed;
   inset: 0;
@@ -771,10 +756,6 @@ button {
 
 .app-shell[data-theme="night"] .theme-toggle-button[aria-pressed="true"] {
   color: #171717;
-}
-
-.app-shell[data-theme="night"] .api-settings-dot {
-  border-color: #18181b;
 }
 
 .app-shell[data-theme="night"] .settings-overlay {

@@ -246,7 +246,6 @@ export function SessionSidebar({
           onClick={() => setIsSettingsOpen(true)}
         >
           <Settings2 size={17} strokeWidth={2.1} aria-hidden="true" />
-          <span className="api-settings-dot" aria-hidden="true" />
         </button>
       </div>
 

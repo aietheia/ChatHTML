@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { applyIframeTheme } from "../core/buildIframeDocument";
 import { isIgnoredRuntimeError } from "../core/ignoredRuntimeErrors";
-import type { PageThemeMode, RenderError, RenderSnapshot } from "../core/types";
+import { applyIframeTheme } from "../runtime/streamui/sandboxDocument";
+import type {
+  PageThemeMode,
+  RenderError,
+  RenderSnapshot
+} from "../runtime/streamui/types";
 
 type PreviewFrameProps = {
   snapshot: RenderSnapshot;

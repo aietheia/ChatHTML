@@ -1,8 +1,12 @@
 import { MessagePrimitive } from "@assistant-ui/react";
 import { useMemo } from "react";
-import { createStreamingRenderer } from "../core/createStreamingRenderer";
-import { extractStreamUiParts } from "../core/extractStreamUiParts";
-import type { PageThemeMode, RenderError, RenderSnapshot } from "../core/types";
+import { extractStreamUiParts } from "../runtime/streamui/protocol";
+import { createStreamingRenderer } from "../runtime/streamui/streamingRenderer";
+import type {
+  PageThemeMode,
+  RenderError,
+  RenderSnapshot
+} from "../runtime/streamui/types";
 import { AssistantPreviewBubble } from "./AssistantPreviewBubble";
 import { AssistantTextBubble } from "./AssistantTextBubble";
 import { RawStreamPanel } from "./RawStreamPanel";

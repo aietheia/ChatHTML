@@ -1,4 +1,4 @@
-import type { RenderError } from "./types";
+import type { RenderError } from "../runtime/streamui/types";
 
 type RuntimeEventLike = Pick<RenderError, "kind" | "message"> & {
   filename?: string;

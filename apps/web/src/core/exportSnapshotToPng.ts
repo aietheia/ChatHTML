@@ -1,6 +1,6 @@
 import { toBlob } from "html-to-image";
-import { buildIframeDocument } from "./buildIframeDocument";
-import type { PageThemeMode, RenderSnapshot } from "./types";
+import { buildIframeDocument } from "../runtime/streamui/sandboxDocument";
+import type { PageThemeMode, RenderSnapshot } from "../runtime/streamui/types";
 
 const MAX_CANVAS_DIMENSION = 16_384;
 const MAX_CANVAS_PIXELS = 32_000_000;
