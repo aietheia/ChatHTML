@@ -534,6 +534,12 @@ export async function handleOpenRouterChat(
       }
     });
 
+    writeStreamEvent(
+      res,
+      { type: "reasoning", text: "Generating..." },
+      toolStreamState
+    );
+
     const result = streamText({
       model: provider(
         model,

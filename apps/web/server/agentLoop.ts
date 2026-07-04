@@ -394,8 +394,18 @@ function mergeRetrievalContexts(
   };
 }
 
-function shouldRunSafetyRetrieval(messages: RetrievalMessage[]): boolean {
+function shouldUseExternalContext(messages: RetrievalMessage[]): boolean {
   const text = latestUserText(messages);
+  const hasExplicitUrl = /\bhttps?:\/\/|\bwww\./i.test(text);
+  const forbidsExternalContext =
+    /\b(no search|do not search|don't search|dont search|without searching|no web|offline answer)\b|不要搜索|不用搜索|别搜索|无需搜索|不要上网|不用上网|不要联网|不用联网|不需要联网|凭已有知识|凭常识/i.test(
+      text
+    );
+
+  if (forbidsExternalContext && !hasExplicitUrl) {
+    return false;
+  }
+
   return /\bhttps?:\/\/|\bwww\.|\b(current|recent|latest|today|tonight|tomorrow|yesterday|news|search|web|online|source|sources|reference|references|link|links|page|url|site|website|browse|fetch|read|lookup|look up|find|research|official|image|images|photo|photos|picture|pictures|gallery|screenshots?|wallpapers?|weather|price|prices|schedule|release|version)\b|最新|今天|现在|新闻|搜索|查询|网页|网站|链接|来源|资料|参考|官网|浏览|读取|查找|图片|照片|图库|图集|壁纸|价格|日程|版本|发布|当前/i.test(
     text
   );
@@ -412,7 +422,7 @@ export async function runStreamUiAgentLoop({
   const maxSteps = getAgentMaxSteps();
 
   if (!enabled) {
-    onStatus?.("Agent loop disabled; using direct retrieval planner...");
+    onStatus?.("Retrieving: agent loop disabled, checking direct context...");
     const context = await collectRetrievalContext(retrievalMessages, {
       searchSettings,
       onStatus
@@ -425,6 +435,20 @@ export async function runStreamUiAgentLoop({
       retrievalContext: context,
       summary: "Agent loop disabled.",
       finalInstructions: "Use the direct retrieval context if relevant."
+    };
+  }
+
+  if (!shouldUseExternalContext(retrievalMessages)) {
+    return {
+      enabled: true,
+      steps: [],
+      observations: [],
+      retrievalContext: makeEmptyRetrievalContext(
+        "Agent loop skipped because the latest request did not contain external retrieval cues."
+      ),
+      summary: "Direct response without external retrieval.",
+      finalInstructions:
+        "Generate the final StreamUI HTML response directly. No external retrieval was needed."
     };
   }
 
@@ -456,7 +480,7 @@ export async function runStreamUiAgentLoop({
 
       for (const call of plan.toolCalls) {
         const label = call.query || call.url || "external context";
-        onStatus?.(`Using retrieval tool for ${label}...`);
+        onStatus?.(`Retrieving: ${label}...`);
         const context = await collectRetrievalContext(
           buildToolMessages(call, retrievalMessages),
           {
@@ -476,8 +500,8 @@ export async function runStreamUiAgentLoop({
       }
     }
 
-    if (!contexts.length && shouldRunSafetyRetrieval(retrievalMessages)) {
-      onStatus?.("Running safety retrieval pass...");
+    if (!contexts.length && shouldUseExternalContext(retrievalMessages)) {
+      onStatus?.("Retrieving: checking external context...");
       const context = await collectRetrievalContext(retrievalMessages, {
         searchSettings,
         onStatus

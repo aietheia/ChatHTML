@@ -1738,7 +1738,9 @@ async function searchImageSources(
     }
 
     try {
-      onStatus?.(`Searching ${provider.name} images for "${cleanQuery}"...`);
+      onStatus?.(
+        `Retrieving: searching ${provider.name} images for "${cleanQuery}"...`
+      );
       const providerResults = await provider.search(cleanQuery, config);
       if (!providerResults.length) {
         notes.push(`${provider.name} returned no image results.`);
@@ -1925,7 +1927,7 @@ async function fetchSources(
   const fetched = await Promise.all(
     targets.map(async ({ url }) => {
       const hostname = getHostname(url) ?? url;
-      onStatus?.(`Fetching ${hostname}...`);
+      onStatus?.(`Browsing: fetching ${hostname}...`);
 
       try {
         const page = await fetchPage(url, config);
@@ -2025,7 +2027,7 @@ export async function collectRetrievalContext(
       if (!queries.includes(query)) {
         queries.push(query);
       }
-      options.onStatus?.(`Searching the web for "${query}"...`);
+      options.onStatus?.(`Retrieving: searching the web for "${query}"...`);
       searchResults = uniqueByUrl([
         ...searchResults,
         ...(await searchWeb(query, config, notes))
@@ -2449,7 +2451,7 @@ async function verifyImageCandidates(
     return [];
   }
 
-  onStatus?.(`Verifying ${candidates.length} image candidates...`);
+  onStatus?.(`Retrieving: verifying ${candidates.length} image candidates...`);
   let rejected = 0;
   const verified = await mapLimited<ImageCandidate, VerifiedImage | null>(
     candidates,
