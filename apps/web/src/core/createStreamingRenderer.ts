@@ -39,7 +39,7 @@ function makeSnapshot(
 ): RenderSnapshot {
   const completedHtml = completePartialHtml(raw, {
     allowScripts: status === "complete",
-    allowPartialStyles: status === "complete"
+    allowPartialStyles: status === "streaming" || status === "complete"
   });
 
   return {
@@ -111,6 +111,11 @@ export function createStreamingRenderer(
     feed(chunk: string) {
       raw += chunk;
       status = "streaming";
+      refresh();
+    },
+    replace(nextRaw: string) {
+      raw = nextRaw;
+      status = raw ? "streaming" : "idle";
       refresh();
     },
     complete() {

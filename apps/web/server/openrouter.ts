@@ -4,8 +4,6 @@ import { streamText, type ModelMessage, type TextStreamPart } from "ai";
 import { buildAgentLoopPrompt, runStreamUiAgentLoop } from "./agentLoop.js";
 import { SYSTEM_PROMPT } from "./systemPrompt.js";
 
-const DEFAULT_MODEL = "google/gemini-3.1-pro-preview";
-const DEFAULT_REASONING_EFFORT: OpenRouterReasoningEffort = "low";
 const MAX_IMAGES_PER_MESSAGE = 4;
 const MAX_IMAGE_DATA_URL_LENGTH = 3_000_000;
 
@@ -16,8 +14,18 @@ type OpenRouterReasoningEffort =
   | "medium"
   | "high"
   | "xhigh"
-  | "max"
   | "none";
+type ApiKeySource = "environment" | "manual";
+
+type RuntimeApiSettings = {
+  providerName: string;
+  baseUrl: string;
+  apiKeySource: ApiKeySource;
+  apiKeyEnvironmentName: string;
+  apiKey: string;
+  model: string;
+  reasoningEffort: OpenRouterReasoningEffort;
+};
 
 type ClientImageAttachment = {
   name?: string;
@@ -53,6 +61,13 @@ type ToolStreamState = {
   reasoningChars: number;
   reasoningEvents: number;
 };
+
+function flushResponse(res: Response): void {
+  const flush = (res as Response & { flush?: () => void }).flush;
+  if (typeof flush === "function") {
+    flush.call(res);
+  }
+}
 
 function clampNumber(value: unknown, fallback: number, min: number, max: number) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -269,6 +284,7 @@ function writeStreamEvent(
   }
 
   res.write(`${JSON.stringify(event)}\n`);
+  flushResponse(res);
 }
 
 function normalizeReasoningEffort(value: unknown): OpenRouterReasoningEffort {
@@ -278,7 +294,6 @@ function normalizeReasoningEffort(value: unknown): OpenRouterReasoningEffort {
     "medium",
     "high",
     "xhigh",
-    "max",
     "none"
   ]);
 
@@ -286,7 +301,161 @@ function normalizeReasoningEffort(value: unknown): OpenRouterReasoningEffort {
     return value as OpenRouterReasoningEffort;
   }
 
-  return DEFAULT_REASONING_EFFORT;
+  throw new Error(
+    "API settings invalid: Reasoning must be none, minimal, low, medium, high, or xhigh."
+  );
+}
+
+function normalizeBaseUrl(value: unknown): string {
+  const input = typeof value === "string" ? value.trim() : "";
+
+  if (!input) {
+    return "";
+  }
+
+  let url: URL;
+  try {
+    url = new URL(input);
+  } catch {
+    throw new Error("API settings invalid: Base URL must be a valid URL.");
+  }
+
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("API settings invalid: Base URL must use http or https.");
+  }
+
+  return input.replace(/\/+$/, "");
+}
+
+function normalizeApiKeySource(value: unknown): ApiKeySource {
+  if (value === "environment" || value === "manual") {
+    return value;
+  }
+
+  return "environment";
+}
+
+function getApiKeyEnvironmentName(
+  providerName: string,
+  baseUrl: string,
+  providerId: unknown
+): string {
+  const normalizedProviderId =
+    typeof providerId === "string" ? providerId.toLowerCase() : "";
+  const normalizedProviderName = providerName.toLowerCase();
+  const normalizedBaseUrl = baseUrl.toLowerCase();
+
+  if (
+    normalizedProviderId === "openrouter" ||
+    normalizedProviderName.includes("openrouter") ||
+    normalizedBaseUrl.includes("openrouter.ai")
+  ) {
+    return "OPENROUTER_API_KEY";
+  }
+  if (
+    normalizedProviderId === "openai" ||
+    normalizedProviderName.includes("openai") ||
+    normalizedBaseUrl.includes("api.openai.com")
+  ) {
+    return "OPENAI_API_KEY";
+  }
+
+  return "STREAMUI_API_KEY";
+}
+
+function readRuntimeApiSettings(input: unknown): RuntimeApiSettings {
+  const object =
+    typeof input === "object" && input !== null
+      ? (input as Record<string, unknown>)
+      : {};
+  const providerName =
+    typeof object.providerName === "string" && object.providerName.trim()
+      ? object.providerName.trim().slice(0, 80)
+      : "custom";
+  const baseUrl = normalizeBaseUrl(object.baseUrl);
+  const apiKeySource = normalizeApiKeySource(object.apiKeySource);
+  const apiKeyEnvironmentName = getApiKeyEnvironmentName(
+    providerName,
+    baseUrl,
+    object.providerId
+  );
+  const apiKey =
+    apiKeySource === "environment"
+      ? process.env[apiKeyEnvironmentName]?.trim() ?? ""
+      : typeof object.apiKey === "string"
+        ? object.apiKey.trim()
+        : "";
+  const model = typeof object.model === "string" ? object.model.trim() : "";
+  const missing: string[] = [];
+
+  if (!baseUrl) {
+    missing.push("Base URL");
+  }
+  if (!apiKey) {
+    missing.push(
+      apiKeySource === "environment" ? apiKeyEnvironmentName : "API key"
+    );
+  }
+  if (!model) {
+    missing.push("Model");
+  }
+
+  if (missing.length) {
+    throw new Error(`API settings missing: ${missing.join(", ")}.`);
+  }
+
+  return {
+    providerName,
+    baseUrl,
+    apiKeySource,
+    apiKeyEnvironmentName,
+    apiKey,
+    model,
+    reasoningEffort: normalizeReasoningEffort(object.reasoningEffort)
+  };
+}
+
+function isOpenRouterRuntime(settings: RuntimeApiSettings): boolean {
+  return (
+    /openrouter/i.test(settings.providerName) ||
+    settings.baseUrl.toLowerCase().includes("openrouter.ai")
+  );
+}
+
+function buildPlannerModelOptions(useOpenRouterReasoning: boolean) {
+  if (!useOpenRouterReasoning) {
+    return undefined;
+  }
+
+  return {
+    extraBody: {
+      reasoning: {
+        effort: "minimal",
+        exclude: true,
+        enabled: true
+      }
+    }
+  };
+}
+
+function buildFinalModelOptions(
+  reasoningEffort: OpenRouterReasoningEffort,
+  useOpenRouterReasoning: boolean
+) {
+  if (!useOpenRouterReasoning || reasoningEffort === "none") {
+    return undefined;
+  }
+
+  return {
+    extraBody: {
+      include_reasoning: true,
+      reasoning: {
+        effort: reasoningEffort,
+        exclude: false,
+        enabled: true
+      }
+    }
+  };
 }
 
 function readStreamText(part: TextStreamPart<any>): string {
@@ -294,12 +463,19 @@ function readStreamText(part: TextStreamPart<any>): string {
     return "";
   }
 
-  const compatPart = part as { text?: unknown; delta?: unknown };
+  const compatPart = part as {
+    text?: unknown;
+    delta?: unknown;
+    textDelta?: unknown;
+  };
   if (typeof compatPart.text === "string") {
     return compatPart.text;
   }
   if (typeof compatPart.delta === "string") {
     return compatPart.delta;
+  }
+  if (typeof compatPart.textDelta === "string") {
+    return compatPart.textDelta;
   }
 
   return "";
@@ -343,41 +519,25 @@ export async function handleOpenRouterChat(
   req: Request,
   res: Response
 ): Promise<void> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-
-  if (!apiKey) {
-    res
-      .status(500)
-      .type("text/plain")
-      .send(
-        "OPENROUTER_API_KEY is not set. Copy .env.example to .env and add your OpenRouter key."
-      );
-    return;
-  }
-
   const body = req.body as {
     messages?: unknown;
-    model?: unknown;
     canvas?: unknown;
     themeMode?: unknown;
-    reasoningEffort?: unknown;
+    apiSettings?: unknown;
+    searchSettings?: unknown;
   };
-  const model =
-    typeof body.model === "string" && body.model.trim()
-      ? body.model.trim()
-      : process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
-  const messages = normalizeMessages(body.messages);
-  const canvasContext = normalizeCanvasContext(body.canvas);
-  const themeMode = normalizeThemeMode(body.themeMode);
-  const reasoningEffort = normalizeReasoningEffort(
-    body.reasoningEffort ?? process.env.OPENROUTER_REASONING_EFFORT
-  );
   const requestId = Math.random().toString(36).slice(2, 9);
   const startedAt = Date.now();
 
   try {
+    const apiSettings = readRuntimeApiSettings(body.apiSettings);
+    const model = apiSettings.model;
+    const messages = normalizeMessages(body.messages);
+    const canvasContext = normalizeCanvasContext(body.canvas);
+    const themeMode = normalizeThemeMode(body.themeMode);
+    const useOpenRouterReasoning = isOpenRouterRuntime(apiSettings);
     console.info(
-      `[chat:${requestId}] start model=${model} messages=${messages.length} theme=${themeMode} reasoning=${reasoningEffort}`
+      `[chat:${requestId}] start provider=${apiSettings.providerName} base_url=${apiSettings.baseUrl} model=${model} messages=${messages.length} theme=${themeMode} reasoning=${apiSettings.reasoningEffort} key_source=${apiSettings.apiKeySource} key_env=${apiSettings.apiKeyEnvironmentName}`
     );
 
     res.writeHead(200, {
@@ -386,6 +546,8 @@ export async function handleOpenRouterChat(
       Connection: "keep-alive",
       "X-Accel-Buffering": "no"
     });
+    res.socket?.setNoDelay(true);
+    res.flushHeaders();
 
     const toolStreamState: ToolStreamState = {
       contentChars: 0,
@@ -394,44 +556,32 @@ export async function handleOpenRouterChat(
       reasoningEvents: 0
     };
 
-    const openrouter = createOpenRouter({
-      apiKey,
+    const provider = createOpenRouter({
+      apiKey: apiSettings.apiKey,
+      baseURL: apiSettings.baseUrl,
       appName: "StreamUI Runtime Demo",
       appUrl: "http://localhost:5173",
-      compatibility: "strict"
+      compatibility: useOpenRouterReasoning ? "strict" : "compatible"
     });
 
     const agentLoop = await runStreamUiAgentLoop({
-      model: openrouter(model, {
-        extraBody: {
-          reasoning: {
-            effort: "minimal",
-            exclude: true,
-            enabled: true
-          }
-        }
-      }),
+      model: provider(model, buildPlannerModelOptions(useOpenRouterReasoning)),
       messages: messages.map(toPlannerMessage),
       retrievalMessages: messages.map((message) => ({
         role: message.role,
         content: message.content
       })),
+      searchSettings: body.searchSettings,
       onStatus: (text) => {
         writeStreamEvent(res, { type: "reasoning", text }, toolStreamState);
       }
     });
 
     const result = streamText({
-      model: openrouter(model, {
-        extraBody: {
-          include_reasoning: true,
-          reasoning: {
-            effort: reasoningEffort,
-            exclude: false,
-            enabled: true
-          }
-        }
-      }),
+      model: provider(
+        model,
+        buildFinalModelOptions(apiSettings.reasoningEffort, useOpenRouterReasoning)
+      ),
       system: [
         SYSTEM_PROMPT,
         buildThemeContextPrompt(themeMode),
@@ -451,7 +601,7 @@ export async function handleOpenRouterChat(
     );
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Unknown OpenRouter proxy error.";
+      error instanceof Error ? error.message : "Unknown chat proxy error.";
     console.error(`[chat:${requestId}] error ${message}`);
 
     if (!res.headersSent) {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { applyIframeTheme } from "../core/buildIframeDocument";
 import { isIgnoredRuntimeError } from "../core/ignoredRuntimeErrors";
 import type { PageThemeMode, RenderError, RenderSnapshot } from "../core/types";
@@ -9,232 +9,13 @@ type PreviewFrameProps = {
   onRuntimeError(error: RenderError): void;
 };
 
-const STREAMING_COMMIT_INTERVAL_MS = 120;
-const SCROLL_SETTLE_MS = 160;
-const PERFORMANCE_GUARD_ID = "streamui-performance-guard";
-const PERFORMANCE_GUARD_CSS = `
-*, *::before, *::after {
-  background-attachment: scroll !important;
-}
-`;
-
-function applyPerformanceGuard(document: Document) {
-  document.getElementById(PERFORMANCE_GUARD_ID)?.remove();
-
-  const style = document.createElement("style");
-  style.id = PERFORMANCE_GUARD_ID;
-  style.textContent = PERFORMANCE_GUARD_CSS;
-  document.body.append(style);
-}
-
-function isElement(node: Node): node is Element {
-  return node.nodeType === Node.ELEMENT_NODE;
-}
-
-function mediaSrc(element: Element): string {
-  return element.getAttribute("src") || element.getAttribute("href") || "";
-}
-
-function shouldPreserveBySrc(current: Element, target: Element): boolean {
-  const tagName = current.tagName.toLowerCase();
-  if (!["img", "source", "video", "audio", "iframe"].includes(tagName)) {
-    return true;
-  }
-
-  const currentSrc = mediaSrc(current);
-  const targetSrc = mediaSrc(target);
-  return !currentSrc || !targetSrc || currentSrc === targetSrc;
-}
-
-function canPatchNode(current: Node, target: Node): boolean {
-  if (current.nodeType !== target.nodeType) {
-    return false;
-  }
-
-  if (!isElement(current) || !isElement(target)) {
-    return true;
-  }
-
-  return (
-    current.tagName.toLowerCase() === target.tagName.toLowerCase() &&
-    shouldPreserveBySrc(current, target)
-  );
-}
-
-function syncAttributes(current: Element, target: Element) {
-  Array.from(current.attributes).forEach((attribute) => {
-    if (!target.hasAttribute(attribute.name)) {
-      current.removeAttribute(attribute.name);
-    }
-  });
-
-  Array.from(target.attributes).forEach((attribute) => {
-    if (current.getAttribute(attribute.name) !== attribute.value) {
-      current.setAttribute(attribute.name, attribute.value);
-    }
-  });
-}
-
-function prepareMediaDefaults(root: ParentNode) {
-  root.querySelectorAll("img").forEach((image) => {
-    if (!image.hasAttribute("loading")) {
-      image.setAttribute("loading", "lazy");
-    }
-    if (!image.hasAttribute("decoding")) {
-      image.setAttribute("decoding", "async");
-    }
-  });
-}
-
-function patchNode(current: Node, target: Node) {
-  if (!canPatchNode(current, target)) {
-    current.parentNode?.replaceChild(target.cloneNode(true), current);
-    return;
-  }
-
-  if (!isElement(current) || !isElement(target)) {
-    if (current.textContent !== target.textContent) {
-      current.textContent = target.textContent;
-    }
-    return;
-  }
-
-  syncAttributes(current, target);
-  patchChildren(current, target);
-}
-
-function patchChildren(current: Node & ParentNode, target: ParentNode) {
-  const currentChildren = Array.from(current.childNodes);
-  const targetChildren = Array.from(target.childNodes);
-  const maxLength = Math.max(currentChildren.length, targetChildren.length);
-
-  for (let index = 0; index < maxLength; index += 1) {
-    const currentChild = currentChildren[index];
-    const targetChild = targetChildren[index];
-
-    if (!targetChild) {
-      if (currentChild?.parentNode === current) {
-        current.removeChild(currentChild);
-      }
-      continue;
-    }
-
-    if (!currentChild) {
-      current.appendChild(targetChild.cloneNode(true));
-      continue;
-    }
-
-    patchNode(currentChild, targetChild);
-  }
-}
-
-function patchBodyHtml(document: Document, html: string) {
-  const template = document.createElement("template");
-  template.innerHTML = html;
-  prepareMediaDefaults(template.content);
-  patchChildren(document.body, template.content);
-}
-
-function runBodyScripts(document: Document) {
-  document.body.querySelectorAll("script").forEach((script) => {
-    const executableScript = document.createElement("script");
-
-    Array.from(script.attributes).forEach((attribute) => {
-      executableScript.setAttribute(attribute.name, attribute.value);
-    });
-
-    executableScript.text = script.text;
-    script.replaceWith(executableScript);
-  });
-}
-
 export function PreviewFrame({
   snapshot,
   themeMode,
   onRuntimeError
 }: PreviewFrameProps) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
-  const initialDocumentRef = useRef(snapshot.iframeDocument);
-  const latestSnapshotRef = useRef(snapshot);
-  const renderFrameRef = useRef<number | null>(null);
-  const commitTimeoutRef = useRef<number | null>(null);
-  const scrollSettleTimeoutRef = useRef<number | null>(null);
-  const lastCommitTimeRef = useRef(0);
-  const isParentScrollingRef = useRef(false);
-  const renderedHtmlRef = useRef(snapshot.completedHtml);
-  const completedHtmlRef = useRef(
-    snapshot.status === "complete" ? snapshot.completedHtml : ""
-  );
-  const [height, setHeight] = useState(260);
-
-  const commitSnapshot = useCallback((nextSnapshot: RenderSnapshot) => {
-    const document = frameRef.current?.contentDocument;
-    if (!document?.body) {
-      return;
-    }
-
-    applyIframeTheme(document, themeMode);
-
-    if (renderedHtmlRef.current === nextSnapshot.completedHtml) {
-      applyPerformanceGuard(document);
-      return;
-    }
-
-    if (nextSnapshot.status === "complete") {
-      if (completedHtmlRef.current === nextSnapshot.completedHtml) {
-        return;
-      }
-
-      patchBodyHtml(document, nextSnapshot.completedHtml);
-      applyPerformanceGuard(document);
-      runBodyScripts(document);
-      renderedHtmlRef.current = nextSnapshot.completedHtml;
-      completedHtmlRef.current = nextSnapshot.completedHtml;
-      lastCommitTimeRef.current = performance.now();
-      return;
-    }
-
-    completedHtmlRef.current = "";
-    patchBodyHtml(document, nextSnapshot.completedHtml);
-    applyPerformanceGuard(document);
-    renderedHtmlRef.current = nextSnapshot.completedHtml;
-    lastCommitTimeRef.current = performance.now();
-  }, [themeMode]);
-
-  const scheduleCommit = useCallback(() => {
-    if (
-      renderFrameRef.current !== null ||
-      commitTimeoutRef.current !== null
-    ) {
-      return;
-    }
-
-    const nextSnapshot = latestSnapshotRef.current;
-    if (
-      nextSnapshot.status === "streaming" &&
-      isParentScrollingRef.current
-    ) {
-      commitTimeoutRef.current = window.setTimeout(() => {
-        commitTimeoutRef.current = null;
-        scheduleCommit();
-      }, SCROLL_SETTLE_MS);
-      return;
-    }
-
-    const elapsed = performance.now() - lastCommitTimeRef.current;
-    const delay =
-      nextSnapshot.status === "streaming"
-        ? Math.max(0, STREAMING_COMMIT_INTERVAL_MS - elapsed)
-        : 0;
-
-    commitTimeoutRef.current = window.setTimeout(() => {
-      commitTimeoutRef.current = null;
-      renderFrameRef.current = window.requestAnimationFrame(() => {
-        renderFrameRef.current = null;
-        commitSnapshot(latestSnapshotRef.current);
-      });
-    }, delay);
-  }, [commitSnapshot]);
+  const [height, setHeight] = useState(96);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -256,10 +37,7 @@ export function PreviewFrame({
 
       if (data.kind === "resize" && typeof data.height === "number") {
         setHeight((currentHeight) => {
-          const nextHeight = Math.max(180, Math.ceil(data.height ?? 0));
-          if (latestSnapshotRef.current.status === "streaming") {
-            return nextHeight > currentHeight + 1 ? nextHeight : currentHeight;
-          }
+          const nextHeight = Math.max(32, Math.ceil(data.height ?? 0));
 
           return Math.abs(nextHeight - currentHeight) > 1
             ? nextHeight
@@ -289,52 +67,13 @@ export function PreviewFrame({
   }, [onRuntimeError]);
 
   useEffect(() => {
-    latestSnapshotRef.current = snapshot;
-    scheduleCommit();
-  }, [scheduleCommit, snapshot]);
-
-  useEffect(() => {
     const document = frameRef.current?.contentDocument;
     if (!document?.body) {
       return;
     }
 
     applyIframeTheme(document, themeMode);
-    scheduleCommit();
-  }, [scheduleCommit, themeMode]);
-
-  useEffect(() => {
-    const scrollContainer = frameRef.current?.closest(".message-list");
-
-    const handleScroll = () => {
-      isParentScrollingRef.current = true;
-
-      if (scrollSettleTimeoutRef.current !== null) {
-        window.clearTimeout(scrollSettleTimeoutRef.current);
-      }
-
-      scrollSettleTimeoutRef.current = window.setTimeout(() => {
-        scrollSettleTimeoutRef.current = null;
-        isParentScrollingRef.current = false;
-        scheduleCommit();
-      }, SCROLL_SETTLE_MS);
-    };
-
-    scrollContainer?.addEventListener("scroll", handleScroll, { passive: true });
-
-    return () => {
-      scrollContainer?.removeEventListener("scroll", handleScroll);
-      if (renderFrameRef.current !== null) {
-        window.cancelAnimationFrame(renderFrameRef.current);
-      }
-      if (commitTimeoutRef.current !== null) {
-        window.clearTimeout(commitTimeoutRef.current);
-      }
-      if (scrollSettleTimeoutRef.current !== null) {
-        window.clearTimeout(scrollSettleTimeoutRef.current);
-      }
-    };
-  }, [scheduleCommit]);
+  }, [snapshot.iframeDocument, themeMode]);
 
   return (
     <iframe
@@ -342,13 +81,12 @@ export function PreviewFrame({
       className="preview-frame"
       title="StreamUI artifact preview"
       sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-      srcDoc={initialDocumentRef.current}
+      srcDoc={snapshot.iframeDocument}
       onLoad={() => {
         const document = frameRef.current?.contentDocument;
         if (document?.body) {
           applyIframeTheme(document, themeMode);
         }
-        commitSnapshot(latestSnapshotRef.current);
       }}
       style={{ height }}
     />

@@ -22,6 +22,20 @@ import {
   completeAttachmentToImage,
   imageAttachmentToCompleteAttachment
 } from "./core/assistantAttachments";
+import {
+  loadApiSettings,
+  normalizeApiSettings,
+  saveApiSettings,
+  serializeApiSettings,
+  type ApiSettings
+} from "./core/apiSettings";
+import {
+  loadSearchSettings,
+  normalizeSearchSettings,
+  saveSearchSettings,
+  serializeSearchSettings,
+  type SearchSettings
+} from "./core/searchSettings";
 import { createStreamingRenderer } from "./core/createStreamingRenderer";
 import { extractStreamUiParts } from "./core/extractStreamUiParts";
 import type { ImageAttachment } from "./core/imageAttachments";
@@ -677,6 +691,9 @@ export default function App() {
     useState<SessionState>(createInitialSessionState);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(loadThemeMode);
+  const [apiSettings, setApiSettings] = useState<ApiSettings>(loadApiSettings);
+  const [searchSettings, setSearchSettings] =
+    useState<SearchSettings>(loadSearchSettings);
   const [isSending, setIsSending] = useState(false);
   const activeSession =
     sessionState.sessions.find(
@@ -707,6 +724,14 @@ export default function App() {
     document.documentElement.dataset.theme = themeMode;
     window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
   }, [themeMode]);
+
+  useEffect(() => {
+    saveApiSettings(apiSettings);
+  }, [apiSettings]);
+
+  useEffect(() => {
+    saveSearchSettings(searchSettings);
+  }, [searchSettings]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -951,6 +976,14 @@ export default function App() {
     });
   }, []);
 
+  const handleApiSettingsChange = useCallback((next: ApiSettings) => {
+    setApiSettings(normalizeApiSettings(next));
+  }, []);
+
+  const handleSearchSettingsChange = useCallback((next: SearchSettings) => {
+    setSearchSettings(normalizeSearchSettings(next));
+  }, []);
+
   const sendStreamUiRequest = useCallback(
     async (text: string, attachments: ImageAttachment[] = []) => {
       const trimmed = text.trim();
@@ -990,29 +1023,15 @@ export default function App() {
 
       let raw = "";
       let reasoning = "";
-      let lastStreamUiLength = 0;
-
       const handleContentChunk = (chunk: string) => {
         raw += chunk;
         const parts = extractStreamUiParts(raw);
 
         if (parts.hasStreamUi) {
-          const renderedStreamUi = renderer.getSnapshot().raw;
-          if (!parts.streamui.startsWith(renderedStreamUi)) {
-            renderer.reset();
-            if (parts.streamui) {
-              renderer.feed(parts.streamui);
-            }
-            lastStreamUiLength = parts.streamui.length;
-          } else {
-            const streamUiDelta = parts.streamui.slice(lastStreamUiLength);
-            if (streamUiDelta) {
-              renderer.feed(streamUiDelta);
-              lastStreamUiLength = parts.streamui.length;
-            }
-          }
+          renderer.replace(parts.streamui);
         }
 
+        const snapshot = parts.hasStreamUi ? renderer.getSnapshot() : undefined;
         const sessionTitle =
           parts.sessionTitleComplete && parts.sessionTitle.trim()
             ? parts.sessionTitle
@@ -1021,6 +1040,7 @@ export default function App() {
         updateAssistant(assistantId, {
           content: parts.chat || (!parts.hasStreamUi ? parts.fallbackText : ""),
           rawStream: raw,
+          ...(snapshot ? { snapshot } : {}),
           ...(sessionTitle ? { sessionTitle } : {}),
           hasStreamUi: parts.hasStreamUi,
           streamUiComplete: parts.streamUiComplete
@@ -1057,7 +1077,9 @@ export default function App() {
           body: JSON.stringify({
             messages: toApiMessages(requestHistory),
             canvas: getCanvasContext(),
-            themeMode
+            themeMode,
+            apiSettings: serializeApiSettings(apiSettings),
+            searchSettings: serializeSearchSettings(searchSettings)
           })
         });
 
@@ -1091,9 +1113,12 @@ export default function App() {
         }
 
         const finalParts = extractStreamUiParts(raw);
+        let finalSnapshot: RenderSnapshot | undefined;
 
         if (finalParts.hasStreamUi && finalParts.streamui.trim()) {
+          renderer.replace(finalParts.streamui);
           renderer.complete();
+          finalSnapshot = renderer.getSnapshot();
         }
 
         updateAssistant(assistantId, {
@@ -1103,6 +1128,7 @@ export default function App() {
             ? { sessionTitle: finalParts.sessionTitle }
             : {}),
           rawStream: raw,
+          ...(finalSnapshot ? { snapshot: finalSnapshot } : {}),
           hasStreamUi: finalParts.hasStreamUi && finalParts.streamui.trim().length > 0,
           streamUiComplete: finalParts.streamUiComplete,
           status: "complete"
@@ -1123,7 +1149,13 @@ export default function App() {
         setIsSending(false);
       }
     },
-    [themeMode, updateActiveSessionMessages, updateAssistant]
+    [
+      apiSettings,
+      searchSettings,
+      themeMode,
+      updateActiveSessionMessages,
+      updateAssistant
+    ]
   );
 
   const handleNewMessage = useCallback(
@@ -1167,10 +1199,14 @@ export default function App() {
             activeSessionId={sessionState.activeSessionId}
             isSending={isSending}
             themeMode={themeMode}
+            apiSettings={apiSettings}
+            searchSettings={searchSettings}
             onNewSession={handleNewSession}
             onSelectSession={handleSelectSession}
             onDeleteSession={handleDeleteSession}
             onThemeModeChange={setThemeMode}
+            onApiSettingsChange={handleApiSettingsChange}
+            onSearchSettingsChange={handleSearchSettingsChange}
           />
         }
       >

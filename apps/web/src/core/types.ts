@@ -20,6 +20,7 @@ export type RenderSnapshot = {
 
 export type StreamingRenderer = {
   feed(chunk: string): void;
+  replace(raw: string): void;
   complete(): void;
   getSnapshot(): RenderSnapshot;
   reset(): void;

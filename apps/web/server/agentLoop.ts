@@ -55,6 +55,7 @@ type RunAgentLoopOptions = {
   model: LanguageModel;
   messages: ModelMessage[];
   retrievalMessages: RetrievalMessage[];
+  searchSettings?: unknown;
   onStatus?: (message: string) => void;
 };
 
@@ -404,6 +405,7 @@ export async function runStreamUiAgentLoop({
   model,
   messages,
   retrievalMessages,
+  searchSettings,
   onStatus
 }: RunAgentLoopOptions): Promise<AgentLoopResult> {
   const enabled = getAgentLoopEnabled();
@@ -412,6 +414,7 @@ export async function runStreamUiAgentLoop({
   if (!enabled) {
     onStatus?.("Agent loop disabled; using direct retrieval planner...");
     const context = await collectRetrievalContext(retrievalMessages, {
+      searchSettings,
       onStatus
     });
 
@@ -459,6 +462,7 @@ export async function runStreamUiAgentLoop({
           {
             forceSearch: call.forceSearch ?? Boolean(call.query),
             forceFetch: call.forceFetch ?? Boolean(call.url),
+            searchSettings,
             onStatus
           }
         );
@@ -475,6 +479,7 @@ export async function runStreamUiAgentLoop({
     if (!contexts.length && shouldRunSafetyRetrieval(retrievalMessages)) {
       onStatus?.("Running safety retrieval pass...");
       const context = await collectRetrievalContext(retrievalMessages, {
+        searchSettings,
         onStatus
       });
       contexts.push(context);
@@ -504,6 +509,7 @@ export async function runStreamUiAgentLoop({
       error instanceof Error ? error.message : "Agent loop failed unexpectedly.";
     onStatus?.(`Agent loop fallback: ${message}`);
     const context = await collectRetrievalContext(retrievalMessages, {
+      searchSettings,
       onStatus
     });
 

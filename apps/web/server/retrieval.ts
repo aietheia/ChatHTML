@@ -22,6 +22,7 @@ const IMAGE_USER_AGENT =
 
 type SearchProvider = "auto" | "brave" | "tavily" | "serper" | "duckduckgo" | "none";
 type BrowserEngine = "fetch" | "playwright";
+type ApiKeySource = "environment" | "manual";
 
 export type RetrievalMessage = {
   role: "user" | "assistant" | "system";
@@ -102,6 +103,9 @@ type SearchResult = {
 type RetrievalConfig = {
   enabled: boolean;
   searchProvider: SearchProvider;
+  braveApiKey?: string;
+  tavilyApiKey?: string;
+  serperApiKey?: string;
   searchMaxResults: number;
   fetchMaxPages: number;
   pageMaxChars: number;
@@ -119,6 +123,7 @@ type RetrievalConfig = {
 type RetrievalOptions = {
   forceSearch?: boolean;
   forceFetch?: boolean;
+  searchSettings?: unknown;
   onStatus?: (message: string) => void;
 };
 
@@ -196,26 +201,87 @@ function normalizeDomainList(value: unknown): string[] | undefined {
   return domains.length ? domains : undefined;
 }
 
-function getRetrievalConfig(): RetrievalConfig {
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function getProviderApiKeys(
+  provider: SearchProvider,
+  apiKeySource: ApiKeySource,
+  apiKey: string
+): Pick<RetrievalConfig, "braveApiKey" | "tavilyApiKey" | "serperApiKey"> {
+  if (apiKeySource === "manual") {
+    return {
+      braveApiKey: provider === "brave" ? apiKey : undefined,
+      tavilyApiKey: provider === "tavily" ? apiKey : undefined,
+      serperApiKey: provider === "serper" ? apiKey : undefined
+    };
+  }
+
   return {
-    enabled: normalizeBoolean(
-      process.env.STREAMUI_RETRIEVAL,
-      DEFAULT_RETRIEVAL_ENABLED
-    ),
-    searchProvider: normalizeChoice(
+    braveApiKey: process.env.BRAVE_SEARCH_API_KEY?.trim(),
+    tavilyApiKey: process.env.TAVILY_API_KEY?.trim(),
+    serperApiKey: process.env.SERPER_API_KEY?.trim()
+  };
+}
+
+function getRetrievalConfig(settingsInput?: unknown): RetrievalConfig {
+  const settings =
+    typeof settingsInput === "object" && settingsInput !== null
+      ? (settingsInput as Record<string, unknown>)
+      : {};
+  const searchProvider = normalizeChoice(
+    settings.provider,
+    normalizeChoice(
       process.env.STREAMUI_SEARCH_PROVIDER,
       DEFAULT_SEARCH_PROVIDER,
       ["auto", "brave", "tavily", "serper", "duckduckgo", "none"] as const
     ),
+    ["auto", "brave", "tavily", "serper", "duckduckgo", "none"] as const
+  );
+  const apiKeySource = normalizeChoice(
+    settings.apiKeySource,
+    "environment",
+    ["environment", "manual"] as const
+  );
+  const effectiveApiKeySource =
+    searchProvider === "brave" ||
+    searchProvider === "tavily" ||
+    searchProvider === "serper"
+      ? apiKeySource
+      : "environment";
+  const providerApiKeys = getProviderApiKeys(
+    searchProvider,
+    effectiveApiKeySource,
+    stringValue(settings.apiKey)
+  );
+
+  return {
+    enabled: normalizeBoolean(
+      settings.enabled,
+      normalizeBoolean(process.env.STREAMUI_RETRIEVAL, DEFAULT_RETRIEVAL_ENABLED)
+    ),
+    searchProvider,
+    ...providerApiKeys,
     searchMaxResults: clampInteger(
-      process.env.STREAMUI_SEARCH_MAX_RESULTS,
-      DEFAULT_SEARCH_MAX_RESULTS,
+      settings.maxResults,
+      clampInteger(
+        process.env.STREAMUI_SEARCH_MAX_RESULTS,
+        DEFAULT_SEARCH_MAX_RESULTS,
+        1,
+        10
+      ),
       1,
       10
     ),
     fetchMaxPages: clampInteger(
-      process.env.STREAMUI_RETRIEVAL_MAX_PAGES,
-      DEFAULT_FETCH_MAX_PAGES,
+      settings.fetchMaxPages,
+      clampInteger(
+        process.env.STREAMUI_RETRIEVAL_MAX_PAGES,
+        DEFAULT_FETCH_MAX_PAGES,
+        0,
+        10
+      ),
       0,
       10
     ),
@@ -238,13 +304,20 @@ function getRetrievalConfig(): RetrievalConfig {
       45_000
     ),
     browserEngine: normalizeChoice(
-      process.env.STREAMUI_BROWSER_ENGINE,
-      DEFAULT_BROWSER_ENGINE,
+      settings.browserEngine,
+      normalizeChoice(
+        process.env.STREAMUI_BROWSER_ENGINE,
+        DEFAULT_BROWSER_ENGINE,
+        ["fetch", "playwright"] as const
+      ),
       ["fetch", "playwright"] as const
     ),
     allowDuckDuckGoFallback: normalizeBoolean(
-      process.env.STREAMUI_SEARCH_ALLOW_DUCKDUCKGO,
-      DEFAULT_ALLOW_DUCKDUCKGO_FALLBACK
+      settings.allowDuckDuckGoFallback,
+      normalizeBoolean(
+        process.env.STREAMUI_SEARCH_ALLOW_DUCKDUCKGO,
+        DEFAULT_ALLOW_DUCKDUCKGO_FALLBACK
+      )
     ),
     allowPrivateUrls: normalizeBoolean(
       process.env.STREAMUI_RETRIEVAL_ALLOW_PRIVATE_URLS,
@@ -877,7 +950,7 @@ async function searchBrave(
   query: string,
   config: RetrievalConfig
 ): Promise<SearchResult[]> {
-  const apiKey = process.env.BRAVE_SEARCH_API_KEY;
+  const apiKey = config.braveApiKey;
   if (!apiKey) {
     throw new Error("BRAVE_SEARCH_API_KEY is not set.");
   }
@@ -924,7 +997,7 @@ async function searchTavily(
   query: string,
   config: RetrievalConfig
 ): Promise<SearchResult[]> {
-  const apiKey = process.env.TAVILY_API_KEY;
+  const apiKey = config.tavilyApiKey;
   if (!apiKey) {
     throw new Error("TAVILY_API_KEY is not set.");
   }
@@ -969,7 +1042,7 @@ async function searchSerper(
   query: string,
   config: RetrievalConfig
 ): Promise<SearchResult[]> {
-  const apiKey = process.env.SERPER_API_KEY;
+  const apiKey = config.serperApiKey;
   if (!apiKey) {
     throw new Error("SERPER_API_KEY is not set.");
   }
@@ -1021,6 +1094,13 @@ function parseDuckDuckGoRedirect(value: string): string | undefined {
   return parseAbsoluteUrl(redirected || absolute);
 }
 
+function isDuckDuckGoChallenge(html: string, status: number): boolean {
+  return (
+    status === 202 ||
+    /anomaly\.js|challenge-form|img-form|captcha/i.test(html)
+  );
+}
+
 async function searchDuckDuckGo(
   query: string,
   config: RetrievalConfig
@@ -1036,11 +1116,15 @@ async function searchDuckDuckGo(
     }
   });
 
-  if (!response.ok) {
-    throw new Error(`DuckDuckGo returned HTTP ${response.status}.`);
+  const html = await readResponseBody(response, 700_000);
+  if (!response.ok || isDuckDuckGoChallenge(html, response.status)) {
+    throw new Error(
+      response.status === 202 || isDuckDuckGoChallenge(html, response.status)
+        ? "DuckDuckGo returned an anomaly challenge instead of search results."
+        : `DuckDuckGo returned HTTP ${response.status}.`
+    );
   }
 
-  const html = await readResponseBody(response, 700_000);
   const $ = load(html);
   const results: SearchResult[] = [];
 
@@ -1063,6 +1147,12 @@ async function searchDuckDuckGo(
       rank: results.length + 1
     });
   });
+
+  if (!results.length && isDuckDuckGoChallenge(html, response.status)) {
+    throw new Error(
+      "DuckDuckGo returned an anomaly challenge instead of search results."
+    );
+  }
 
   return results;
 }
@@ -1677,9 +1767,9 @@ async function searchWeb(
   const providers: SearchProvider[] =
     config.searchProvider === "auto"
       ? [
-          process.env.BRAVE_SEARCH_API_KEY ? "brave" : undefined,
-          process.env.TAVILY_API_KEY ? "tavily" : undefined,
-          process.env.SERPER_API_KEY ? "serper" : undefined,
+          config.braveApiKey ? "brave" : undefined,
+          config.tavilyApiKey ? "tavily" : undefined,
+          config.serperApiKey ? "serper" : undefined,
           config.allowDuckDuckGoFallback ? "duckduckgo" : undefined
         ].filter((provider): provider is SearchProvider => Boolean(provider))
       : [config.searchProvider];
@@ -1866,7 +1956,7 @@ export async function collectRetrievalContext(
   messages: RetrievalMessage[],
   options: RetrievalOptions = {}
 ): Promise<RetrievalContext> {
-  const config = getRetrievalConfig();
+  const config = getRetrievalConfig(options.searchSettings);
   const nowIso = new Date().toISOString();
   const text = latestUserText(messages);
   const directUrls = extractUrls(text).filter((url) =>
@@ -2566,9 +2656,14 @@ export async function handleRetrievalRequest(
       typeof req.body === "object" &&
       req.body !== null &&
       normalizeBoolean((req.body as { forceFetch?: unknown }).forceFetch, false);
+    const searchSettings =
+      typeof req.body === "object" && req.body !== null
+        ? (req.body as { searchSettings?: unknown }).searchSettings
+        : undefined;
     const context = await collectRetrievalContext(messages, {
       forceSearch,
-      forceFetch
+      forceFetch,
+      searchSettings
     });
 
     res.json(context);

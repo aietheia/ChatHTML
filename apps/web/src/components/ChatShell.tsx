@@ -9,8 +9,10 @@ type ChatShellProps = {
 export function ChatShell({ children, sidebar, themeMode = "night" }: ChatShellProps) {
   return (
     <main className="app-shell" data-theme={themeMode}>
-      {sidebar}
-      <section className="chat-workspace">{children}</section>
+      <div className="app-body">
+        {sidebar}
+        <section className="chat-workspace">{children}</section>
+      </div>
     </main>
   );
 }
