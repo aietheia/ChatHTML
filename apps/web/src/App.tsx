@@ -88,6 +88,50 @@ const MAX_RUNTIME_REPAIR_ATTEMPTS = 2;
 const MAX_RUNTIME_REPAIR_SOURCE_CHARS = 32_000;
 const MAX_RUNTIME_REPAIR_ERROR_CHARS = 4_000;
 
+function serializeSessionStateForSave(state: SessionState): string {
+  return JSON.stringify({
+    sessions: serializeSessions(state.sessions),
+    activeSessionId: state.activeSessionId
+  });
+}
+
+function saveSerializedSessionState(
+  serializedState: string,
+  signal?: AbortSignal
+): Promise<Response> {
+  return fetch("/api/sessions", {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    signal,
+    body: serializedState
+  });
+}
+
+function saveSessionStateOnPageExit(serializedState: string): void {
+  if (
+    typeof navigator !== "undefined" &&
+    typeof navigator.sendBeacon === "function"
+  ) {
+    const body = new Blob([serializedState], { type: "application/json" });
+    if (navigator.sendBeacon("/api/sessions", body)) {
+      return;
+    }
+  }
+
+  void fetch("/api/sessions", {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    keepalive: true,
+    body: serializedState
+  }).catch((error) => {
+    console.warn("Could not flush StreamUI sessions before page exit.", error);
+  });
+}
+
 function renderErrorKey(error: Pick<RenderError, "kind" | "message">): string {
   return `${error.kind}:${error.message}`;
 }
@@ -504,25 +548,46 @@ export default function App() {
     () => getSelectableModelOptions(apiSettings),
     [apiSettings]
   );
+  const sessionStateRef = useRef(sessionState);
   const messagesRef = useRef(messages);
   const activeSessionIdRef = useRef(sessionState.activeSessionId);
   const isSendingRef = useRef(isSending);
+  const sessionsLoadedRef = useRef(sessionsLoaded);
   const saveAbortRef = useRef<AbortController | null>(null);
+  const lastSavedSessionPayloadRef = useRef<string | null>(null);
   const renderersRef = useRef<Map<string, StreamingRenderer>>(new Map());
   const runtimeRepairQueueRef = useRef<
     ((id: string, error: RenderError) => void) | null
   >(null);
   const runtimeRepairInFlightRef = useRef<Set<string>>(new Set());
   const attachmentAdapter = useMemo(() => new StreamImageAttachmentAdapter(), []);
+  const setSessionStateAndRef = useCallback(
+    (updater: SessionState | ((current: SessionState) => SessionState)) => {
+      const current = sessionStateRef.current;
+      const next =
+        typeof updater === "function"
+          ? (updater as (current: SessionState) => SessionState)(current)
+          : updater;
+
+      sessionStateRef.current = next;
+      setSessionState(next);
+    },
+    []
+  );
 
   useEffect(() => {
+    sessionStateRef.current = sessionState;
     messagesRef.current = messages;
     activeSessionIdRef.current = sessionState.activeSessionId;
-  }, [messages, sessionState.activeSessionId]);
+  }, [messages, sessionState]);
 
   useEffect(() => {
     isSendingRef.current = isSending;
   }, [isSending]);
+
+  useEffect(() => {
+    sessionsLoadedRef.current = sessionsLoaded;
+  }, [sessionsLoaded]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -589,7 +654,7 @@ export default function App() {
         if (!cancelled) {
           const serverState = normalizeStoredSessionState(data);
           const legacyState = loadLegacyLocalSessionState();
-          setSessionState(
+          setSessionStateAndRef(
             !hasPersistedMessages(serverState) &&
               legacyState &&
               hasPersistedMessages(legacyState)
@@ -605,6 +670,7 @@ export default function App() {
       })
       .finally(() => {
         if (!cancelled) {
+          sessionsLoadedRef.current = true;
           setSessionsLoaded(true);
         }
       });
@@ -612,7 +678,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [setSessionStateAndRef]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !sessionsLoaded) {
@@ -622,20 +688,18 @@ export default function App() {
     const controller = new AbortController();
     saveAbortRef.current?.abort();
     saveAbortRef.current = controller;
+    const serializedState = serializeSessionStateForSave(sessionState);
 
     const timeout = window.setTimeout(() => {
-      fetch("/api/sessions", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          sessions: serializeSessions(sessionState.sessions),
-          activeSessionId: sessionState.activeSessionId
+      saveSerializedSessionState(serializedState, controller.signal)
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`Session save failed with HTTP ${response.status}.`);
+          }
+
+          lastSavedSessionPayloadRef.current = serializedState;
+          clearLegacyLocalSessions();
         })
-      })
-        .then(() => clearLegacyLocalSessions())
         .catch((error) => {
           if ((error as { name?: unknown }).name !== "AbortError") {
             console.warn("Could not save StreamUI sessions.", error);
@@ -649,9 +713,45 @@ export default function App() {
     };
   }, [sessionState, sessionsLoaded]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const flushSessions = () => {
+      if (!sessionsLoadedRef.current) {
+        return;
+      }
+
+      const serializedState = serializeSessionStateForSave(sessionStateRef.current);
+      if (serializedState === lastSavedSessionPayloadRef.current) {
+        return;
+      }
+
+      lastSavedSessionPayloadRef.current = serializedState;
+      saveSessionStateOnPageExit(serializedState);
+    };
+
+    const flushWhenHidden = () => {
+      if (document.visibilityState === "hidden") {
+        flushSessions();
+      }
+    };
+
+    window.addEventListener("pagehide", flushSessions);
+    window.addEventListener("beforeunload", flushSessions);
+    document.addEventListener("visibilitychange", flushWhenHidden);
+
+    return () => {
+      window.removeEventListener("pagehide", flushSessions);
+      window.removeEventListener("beforeunload", flushSessions);
+      document.removeEventListener("visibilitychange", flushWhenHidden);
+    };
+  }, []);
+
   const updateActiveSessionMessages = useCallback(
     (updater: (messages: ClientMessage[]) => ClientMessage[]) => {
-      setSessionState((current) => {
+      setSessionStateAndRef((current) => {
         const now = Date.now();
         const sessions = current.sessions.map((session) => {
           if (session.id !== current.activeSessionId) {
@@ -673,12 +773,12 @@ export default function App() {
         };
       });
     },
-    []
+    [setSessionStateAndRef]
   );
 
   const updateAssistant = useCallback(
     (id: string, patch: Partial<ClientMessage>) => {
-      setSessionState((current) => {
+      setSessionStateAndRef((current) => {
         let didUpdate = false;
         const now = Date.now();
         const sessions = current.sessions.map((session) => {
@@ -713,7 +813,7 @@ export default function App() {
           : current;
       });
     },
-    []
+    [setSessionStateAndRef]
   );
 
   const handleRuntimeError = useCallback(
@@ -725,7 +825,7 @@ export default function App() {
         hasRenderError(currentMessage?.runtimeErrors, error) ||
         hasRenderError(currentMessage?.snapshot?.errors, error);
 
-      setSessionState((current) => {
+      setSessionStateAndRef((current) => {
         let didUpdate = false;
         const sessions = current.sessions.map((session) => {
           let sessionChanged = false;
@@ -767,7 +867,7 @@ export default function App() {
         }, 0);
       }
     },
-    []
+    [setSessionStateAndRef]
   );
 
   const handleNewSession = useCallback(() => {
@@ -775,7 +875,7 @@ export default function App() {
       return;
     }
 
-    setSessionState((current) => {
+    setSessionStateAndRef((current) => {
       const active = current.sessions.find(
         (session) => session.id === current.activeSessionId
       );
@@ -789,26 +889,26 @@ export default function App() {
         activeSessionId: session.id
       };
     });
-  }, []);
+  }, [setSessionStateAndRef]);
 
   const handleSelectSession = useCallback((id: string) => {
     if (isSendingRef.current && id !== activeSessionIdRef.current) {
       return;
     }
 
-    setSessionState((current) =>
+    setSessionStateAndRef((current) =>
       current.sessions.some((session) => session.id === id)
         ? { ...current, activeSessionId: id }
         : current
     );
-  }, []);
+  }, [setSessionStateAndRef]);
 
   const handleDeleteSession = useCallback((id: string) => {
     if (isSendingRef.current) {
       return;
     }
 
-    setSessionState((current) => {
+    setSessionStateAndRef((current) => {
       const remaining = current.sessions.filter((session) => session.id !== id);
       if (!remaining.length) {
         const session = createEmptySession();
@@ -826,7 +926,7 @@ export default function App() {
         activeSessionId
       };
     });
-  }, []);
+  }, [setSessionStateAndRef]);
 
   const handleApiSettingsChange = useCallback((next: ApiSettings) => {
     setApiSettings(normalizeApiSettings(next));

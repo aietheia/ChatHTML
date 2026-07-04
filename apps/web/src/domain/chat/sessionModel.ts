@@ -41,6 +41,8 @@ export type SessionState = {
 
 export const initialMessages: ClientMessage[] = [];
 export const UNTITLED_SESSION = "New Session";
+export const STREAM_INTERRUPTED_ERROR =
+  "The stream was interrupted before it completed.";
 
 export function createId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -420,9 +422,17 @@ export function serializeMessage(
   message: ClientMessage
 ): Omit<ClientMessage, "snapshot"> {
   const { snapshot: _snapshot, ...serializable } = message;
+
+  if (serializable.status === "streaming") {
+    return {
+      ...serializable,
+      status: "error",
+      error: serializable.error ?? STREAM_INTERRUPTED_ERROR
+    };
+  }
+
   return {
-    ...serializable,
-    status: serializable.status === "streaming" ? "complete" : serializable.status
+    ...serializable
   };
 }
 

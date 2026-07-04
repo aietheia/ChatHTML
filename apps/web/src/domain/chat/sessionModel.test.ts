@@ -8,6 +8,7 @@ import {
   normalizeStoredMessage,
   normalizeStoredSessionState,
   serializeSessions,
+  STREAM_INTERRUPTED_ERROR,
   summarizeSession,
   titleFromText,
   type ChatSession,
@@ -137,7 +138,7 @@ describe("sessionModel", () => {
     );
   });
 
-  it("serializes sessions without transient snapshots", () => {
+  it("serializes sessions without transient snapshots and marks active streams", () => {
     const sessions: ChatSession[] = [
       {
         id: "s1",
@@ -164,7 +165,8 @@ describe("sessionModel", () => {
 
     const serialized = serializeSessions(sessions);
 
-    assert.equal(serialized[0].messages[0].status, "complete");
+    assert.equal(serialized[0].messages[0].status, "error");
+    assert.equal(serialized[0].messages[0].error, STREAM_INTERRUPTED_ERROR);
     assert.equal("snapshot" in serialized[0].messages[0], false);
   });
 

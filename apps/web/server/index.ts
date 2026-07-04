@@ -35,6 +35,7 @@ app.post("/api/models", handleModelsRequest);
 app.post("/api/retrieve", handleRetrievalRequest);
 app.get("/api/settings", handleGetRuntimeSettings);
 app.get("/api/sessions", handleGetSessions);
+app.post("/api/sessions", handleSaveSessions);
 app.put("/api/sessions", handleSaveSessions);
 
 if (existsSync(clientDist)) {
