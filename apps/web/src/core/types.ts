@@ -5,5 +5,6 @@ export type {
   RenderErrorKind,
   RenderSnapshot,
   RenderStatus,
+  StreamUiAction,
   StreamingRenderer
 } from "../runtime/streamui/types";

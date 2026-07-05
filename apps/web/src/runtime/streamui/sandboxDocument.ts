@@ -167,11 +167,18 @@ export function buildIframeDocument(
       color: var(--streamui-button-text);
       font-size: 13px;
       font-weight: 620;
+      cursor: pointer;
     }
     .streamui-button.secondary {
       border-color: var(--streamui-secondary-border);
       background: transparent;
       color: var(--streamui-secondary-text);
+    }
+    .streamui-button:disabled,
+    .streamui-button[aria-disabled="true"],
+    [data-streamui-prompt][aria-busy="true"] {
+      cursor: progress;
+      opacity: 0.62;
     }
     .streamui-resource {
       margin-top: 12px;
@@ -257,6 +264,62 @@ export function buildIframeDocument(
           }
         });
       };
+      const MAX_ACTION_PROMPT_CHARS = 2000;
+      const findPromptAction = (target) => {
+        if (!(target instanceof Element)) {
+          return null;
+        }
+
+        return target.closest("[data-streamui-prompt]");
+      };
+      const isActionDisabled = (element) => {
+        return (
+          element.getAttribute("aria-disabled") === "true" ||
+          element.getAttribute("disabled") !== null ||
+          Boolean(element.disabled)
+        );
+      };
+      const markActionPending = (element) => {
+        const pendingText = element.getAttribute("data-streamui-pending");
+        element.setAttribute("aria-busy", "true");
+        element.setAttribute("aria-disabled", "true");
+        if ("disabled" in element) {
+          try {
+            element.disabled = true;
+          } catch {}
+        }
+        if (pendingText && typeof element.textContent === "string") {
+          element.textContent = pendingText;
+        }
+      };
+      document.addEventListener("click", (event) => {
+        const trigger = findPromptAction(event.target);
+        if (!trigger) {
+          return;
+        }
+
+        const label = (
+          trigger.getAttribute("data-streamui-label") ||
+          trigger.textContent ||
+          ""
+        ).trim();
+        const prompt = (
+          trigger.getAttribute("data-streamui-prompt") ||
+          label
+        ).trim().slice(0, MAX_ACTION_PROMPT_CHARS);
+
+        if (!prompt || isActionDisabled(trigger)) {
+          return;
+        }
+
+        event.preventDefault();
+        markActionPending(trigger);
+        post("action", prompt, {
+          actionType: "prompt",
+          prompt,
+          label: label.slice(0, 200)
+        });
+      }, true);
       const scheduleMeasure = () => requestAnimationFrame(() => {
         normalizeExternalLinks();
         measure();

@@ -17,4 +17,14 @@ describe("sandboxDocument", () => {
     assert.match(document, /<p>Hello<\/p>/);
     assert.match(document, /source: "streamui-runtime"/);
   });
+
+  it("includes the prompt action bridge", () => {
+    const document = buildIframeDocument(
+      '<button data-streamui-prompt="Continue">Continue</button>'
+    );
+
+    assert.match(document, /data-streamui-prompt/);
+    assert.match(document, /actionType: "prompt"/);
+    assert.match(document, /post\("action"/);
+  });
 });

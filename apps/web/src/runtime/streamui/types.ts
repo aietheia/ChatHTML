@@ -10,6 +10,12 @@ export type RenderError = {
   timestamp: number;
 };
 
+export type StreamUiAction = {
+  type: "prompt";
+  prompt: string;
+  label?: string;
+};
+
 export type RenderSnapshot = {
   raw: string;
   completedHtml: string;

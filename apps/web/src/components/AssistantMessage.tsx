@@ -6,7 +6,8 @@ import { createStreamingRenderer } from "../runtime/streamui/streamingRenderer";
 import type {
   PageThemeMode,
   RenderError,
-  RenderSnapshot
+  RenderSnapshot,
+  StreamUiAction
 } from "../runtime/streamui/types";
 import { AssistantPreviewBubble } from "./AssistantPreviewBubble";
 import { AssistantTextBubble } from "./AssistantTextBubble";
@@ -25,6 +26,7 @@ type AssistantMessageProps = {
   status?: "streaming" | "complete" | "error";
   error?: string;
   onRuntimeError(id: string, error: RenderError): void;
+  onArtifactAction(id: string, action: StreamUiAction): void;
 };
 
 function hasLikelyVisibleStreamUiContent(rawStream?: string): boolean {
@@ -59,7 +61,8 @@ export function AssistantMessage({
   themeMode,
   status,
   error,
-  onRuntimeError
+  onRuntimeError,
+  onArtifactAction
 }: AssistantMessageProps) {
   const resolvedSnapshot = useMemo(() => {
     const withRuntimeErrors = (
@@ -139,6 +142,7 @@ export function AssistantMessage({
             snapshot={resolvedSnapshot}
             themeMode={themeMode}
             onRuntimeError={onRuntimeError}
+            onArtifactAction={onArtifactAction}
           />
         ) : null}
         <RawStreamPanel raw={rawStream} />

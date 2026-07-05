@@ -4,19 +4,22 @@ import { applyIframeTheme } from "../runtime/streamui/sandboxDocument";
 import type {
   PageThemeMode,
   RenderError,
-  RenderSnapshot
+  RenderSnapshot,
+  StreamUiAction
 } from "../runtime/streamui/types";
 
 type PreviewFrameProps = {
   snapshot: RenderSnapshot;
   themeMode: PageThemeMode;
   onRuntimeError(error: RenderError): void;
+  onArtifactAction(action: StreamUiAction): void;
 };
 
 export function PreviewFrame({
   snapshot,
   themeMode,
-  onRuntimeError
+  onRuntimeError,
+  onArtifactAction
 }: PreviewFrameProps) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [height, setHeight] = useState(96);
@@ -29,13 +32,29 @@ export function PreviewFrame({
 
       const data = event.data as {
         source?: string;
-        kind?: RenderError["kind"] | "resize";
+        kind?: RenderError["kind"] | "resize" | "action";
+        actionType?: string;
+        prompt?: string;
+        label?: string;
         message?: string;
         filename?: string;
         height?: number;
       };
 
       if (data?.source !== "streamui-runtime") {
+        return;
+      }
+
+      if (data.kind === "action" && data.actionType === "prompt") {
+        const prompt = String(data.prompt || data.message || "").trim();
+        const label = String(data.label || "").trim();
+        if (prompt) {
+          onArtifactAction({
+            type: "prompt",
+            prompt: prompt.slice(0, 2000),
+            ...(label ? { label: label.slice(0, 200) } : {})
+          });
+        }
         return;
       }
 
@@ -68,7 +87,7 @@ export function PreviewFrame({
 
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [onRuntimeError]);
+  }, [onArtifactAction, onRuntimeError]);
 
   useEffect(() => {
     const document = frameRef.current?.contentDocument;

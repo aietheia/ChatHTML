@@ -1,5 +1,10 @@
 import { useRef } from "react";
-import type { PageThemeMode, RenderError, RenderSnapshot } from "../core/types";
+import type {
+  PageThemeMode,
+  RenderError,
+  RenderSnapshot,
+  StreamUiAction
+} from "../core/types";
 import { ArtifactExportMenu } from "./ArtifactExportMenu";
 import { ErrorPanel } from "./ErrorPanel";
 import { PreviewFrame } from "./PreviewFrame";
@@ -9,13 +14,15 @@ type AssistantPreviewBubbleProps = {
   snapshot: RenderSnapshot;
   themeMode: PageThemeMode;
   onRuntimeError(id: string, error: RenderError): void;
+  onArtifactAction(id: string, action: StreamUiAction): void;
 };
 
 export function AssistantPreviewBubble({
   id,
   snapshot,
   themeMode,
-  onRuntimeError
+  onRuntimeError,
+  onArtifactAction
 }: AssistantPreviewBubbleProps) {
   const containerRef = useRef<HTMLElement | null>(null);
   const getExportWidth = () => containerRef.current?.clientWidth ?? 900;
@@ -30,6 +37,7 @@ export function AssistantPreviewBubble({
           snapshot={snapshot}
           themeMode={themeMode}
           onRuntimeError={(error) => onRuntimeError(id, error)}
+          onArtifactAction={(action) => onArtifactAction(id, action)}
         />
         <ErrorPanel errors={snapshot.errors} />
       </section>

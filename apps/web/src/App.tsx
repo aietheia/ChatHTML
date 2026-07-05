@@ -75,6 +75,7 @@ import { createStreamingRenderer } from "./runtime/streamui/streamingRenderer";
 import type {
   RenderError,
   RenderSnapshot,
+  StreamUiAction,
   StreamingRenderer
 } from "./runtime/streamui/types";
 
@@ -535,6 +536,17 @@ function getAppendMessageText(message: AppendMessage): string {
     .trim();
 }
 
+function buildArtifactActionMessage(action: StreamUiAction): string {
+  const prompt = action.prompt.trim().slice(0, 2000);
+  const label = action.label?.trim().slice(0, 200);
+
+  if (!label || label === prompt) {
+    return prompt;
+  }
+
+  return `I clicked "${label}".\n\n${prompt}`;
+}
+
 function findSessionMessage(
   state: SessionState,
   messageId: string
@@ -593,6 +605,7 @@ type StreamThreadProps = {
   modelOptions: string[];
   reasoningEffort: ReasoningEffort;
   onRuntimeError(id: string, error: RenderError): void;
+  onArtifactAction(id: string, action: StreamUiAction): void;
   onModelChange(model: string): void;
   onReasoningEffortChange(reasoningEffort: ReasoningEffort): void;
 };
@@ -648,6 +661,7 @@ function StreamThread({
   modelOptions,
   reasoningEffort,
   onRuntimeError,
+  onArtifactAction,
   onModelChange,
   onReasoningEffortChange
 }: StreamThreadProps) {
@@ -778,6 +792,7 @@ function StreamThread({
                   status={clientMessage.status}
                   error={clientMessage.error}
                   onRuntimeError={onRuntimeError}
+                  onArtifactAction={onArtifactAction}
                 />
               );
             }
@@ -1860,6 +1875,22 @@ export default function App() {
     ]
   );
 
+  const handleArtifactAction = useCallback(
+    (_messageId: string, action: StreamUiAction) => {
+      if (isSendingRef.current) {
+        return;
+      }
+
+      const text = buildArtifactActionMessage(action);
+      if (!text) {
+        return;
+      }
+
+      void sendStreamUiRequest(text);
+    },
+    [sendStreamUiRequest]
+  );
+
   useEffect(() => {
     if (!sessionsLoaded) {
       return;
@@ -2337,6 +2368,7 @@ export default function App() {
           modelOptions={selectableModels}
           reasoningEffort={apiSettings.reasoningEffort}
           onRuntimeError={handleRuntimeError}
+          onArtifactAction={handleArtifactAction}
           onModelChange={handleModelChange}
           onReasoningEffortChange={handleReasoningEffortChange}
         />
