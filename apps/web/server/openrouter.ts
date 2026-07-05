@@ -1170,6 +1170,76 @@ export function extractResponsesOutputText(response: unknown): string {
     .join("\n");
 }
 
+function compactErrorText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function stripHtmlTags(value: string): string {
+  return compactErrorText(
+    value
+      .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, "\"")
+      .replace(/&#39;/gi, "'")
+  );
+}
+
+function looksLikeHtml(value: string): boolean {
+  return /<!doctype\s+html|<html\b|<head\b|<body\b|<\/?[a-z][\s\S]*>/i.test(
+    value
+  );
+}
+
+function extractHtmlTitle(value: string): string {
+  const match = /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(value);
+  return match ? stripHtmlTags(match[1]) : "";
+}
+
+export function summarizeHttpErrorBody(
+  value: string,
+  fallback = "The provider returned an error."
+): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+
+  const parsed = safeJsonParse(trimmed);
+  const jsonMessage = responsesErrorMessage(parsed);
+  if (jsonMessage) {
+    return compactErrorText(jsonMessage).slice(0, 500);
+  }
+
+  if (looksLikeHtml(trimmed)) {
+    const title = extractHtmlTitle(trimmed);
+    const text = title || stripHtmlTags(trimmed);
+    return (text || fallback).slice(0, 180);
+  }
+
+  return compactErrorText(trimmed).slice(0, 500);
+}
+
+function formatResponsesHttpError(
+  response: { status: number; statusText?: string },
+  bodyText: string
+): string {
+  const statusText = compactErrorText(response.statusText || "");
+  const status = `HTTP ${response.status}${statusText ? ` ${statusText}` : ""}`;
+  const detail = summarizeHttpErrorBody(bodyText, "");
+  const prefix = `Responses API request failed with ${status}.`;
+
+  if (!detail || detail.toLowerCase().includes(String(response.status))) {
+    return prefix;
+  }
+
+  return `${prefix} ${detail}`;
+}
+
 function responsesErrorMessage(input: unknown): string {
   if (!input || typeof input !== "object") {
     return "";
@@ -1271,7 +1341,7 @@ async function streamResponsesOnce({
 
   if (!response.ok || !response.body) {
     const text = await response.text();
-    throw new Error(text || `Responses API request failed with ${response.status}.`);
+    throw new Error(formatResponsesHttpError(response, text));
   }
 
   const decoder = new TextDecoder();

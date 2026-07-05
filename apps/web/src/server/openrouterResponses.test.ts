@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { extractResponsesOutputText } from "../../server/openrouter.js";
+import {
+  extractResponsesOutputText,
+  summarizeHttpErrorBody
+} from "../../server/openrouter.js";
 
 describe("openrouter response stream helpers", () => {
   it("extracts final output text from a completed Responses payload", () => {
@@ -36,5 +39,23 @@ describe("openrouter response stream helpers", () => {
     });
 
     assert.equal(text, "Final answer");
+  });
+
+  it("summarizes html error pages without leaking markup", () => {
+    const message = summarizeHttpErrorBody(`<!DOCTYPE html>
+      <html><head><title>aiz.ink | 502: Bad gateway</title></head>
+      <body><h1>Bad gateway</h1><script>ignored()</script></body></html>`);
+
+    assert.equal(message, "aiz.ink | 502: Bad gateway");
+    assert.equal(message.includes("<html"), false);
+  });
+
+  it("prefers json error messages when summarizing response failures", () => {
+    assert.equal(
+      summarizeHttpErrorBody(
+        JSON.stringify({ error: { message: "Provider overloaded" } })
+      ),
+      "Provider overloaded"
+    );
   });
 });

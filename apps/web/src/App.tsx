@@ -340,6 +340,99 @@ function saveSessionStateOnPageExit(
   });
 }
 
+function compactErrorText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function stripHtmlErrorText(value: string): string {
+  return compactErrorText(
+    value
+      .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, "\"")
+      .replace(/&#39;/gi, "'")
+  );
+}
+
+function looksLikeHtmlError(value: string): boolean {
+  return /<!doctype\s+html|<html\b|<head\b|<body\b|<\/?[a-z][\s\S]*>/i.test(
+    value
+  );
+}
+
+function extractHtmlErrorTitle(value: string): string {
+  const match = /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(value);
+  return match ? stripHtmlErrorText(match[1]) : "";
+}
+
+function safeErrorJsonMessage(value: string): string {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object") {
+      return "";
+    }
+
+    const error = parsed as { error?: unknown; message?: unknown };
+    if (typeof error.message === "string" && error.message.trim()) {
+      return error.message.trim();
+    }
+    if (typeof error.error === "string" && error.error.trim()) {
+      return error.error.trim();
+    }
+    if (error.error && typeof error.error === "object") {
+      const nested = error.error as { message?: unknown };
+      return typeof nested.message === "string" ? nested.message.trim() : "";
+    }
+  } catch {
+    return "";
+  }
+
+  return "";
+}
+
+function sanitizeChatErrorMessage(
+  value: string | undefined,
+  fallback = "The chat request failed."
+): string {
+  const raw = value?.trim() ?? "";
+  if (!raw) {
+    return fallback;
+  }
+
+  const jsonMessage = safeErrorJsonMessage(raw);
+  if (jsonMessage) {
+    return compactErrorText(jsonMessage).slice(0, 500);
+  }
+
+  if (looksLikeHtmlError(raw)) {
+    return (
+      extractHtmlErrorTitle(raw) ||
+      stripHtmlErrorText(raw) ||
+      fallback
+    ).slice(0, 180);
+  }
+
+  return compactErrorText(raw).slice(0, 500);
+}
+
+function formatChatHttpError(response: Response, bodyText: string): string {
+  const statusText = compactErrorText(response.statusText || "");
+  const status = `HTTP ${response.status}${statusText ? ` ${statusText}` : ""}`;
+  const detail = sanitizeChatErrorMessage(bodyText, "");
+  const prefix = `Request failed with ${status}.`;
+
+  if (!detail || detail.toLowerCase().includes(String(response.status))) {
+    return prefix;
+  }
+
+  return `${prefix} ${detail}`;
+}
+
 function mergeSyncedSessionState(
   current: SessionState,
   serverState: SessionState
@@ -1674,7 +1767,7 @@ export default function App() {
 
         if (terminalStatus) {
           doneStatus = terminalStatus;
-          doneError = serverMessage.error ?? "";
+          doneError = sanitizeChatErrorMessage(serverMessage.error, "");
           completedFromServer = true;
           streamController.abort();
         }
@@ -1761,7 +1854,7 @@ export default function App() {
           }
           if (event.type === "done") {
             doneStatus = event.status === "error" ? "error" : "complete";
-            doneError = event.error ?? "";
+            doneError = sanitizeChatErrorMessage(event.error, "");
             if (typeof streamSequence === "number") {
               updateAssistant(assistantId, { streamSequence });
             }
@@ -1830,7 +1923,7 @@ export default function App() {
 
         if (!response.ok || !response.body) {
           const errorText = await response.text();
-          throw new Error(errorText || `Request failed with ${response.status}.`);
+          throw new Error(formatChatHttpError(response, errorText));
         }
         streamConnected = true;
 
@@ -1874,7 +1967,7 @@ export default function App() {
             reasoning,
             rawStream: raw,
             streamSequence: lastStreamSequence,
-            error: doneError || "The chat request failed.",
+            error: sanitizeChatErrorMessage(doneError),
             status: "error"
           });
           return;
@@ -1931,7 +2024,9 @@ export default function App() {
           return;
         }
         const message =
-          error instanceof Error ? error.message : "The chat request failed.";
+          error instanceof Error
+            ? sanitizeChatErrorMessage(error.message)
+            : "The chat request failed.";
         if (streamConnected && doneStatus !== "error") {
           updateAssistant(assistantId, {
             reasoning,
@@ -2057,7 +2152,7 @@ export default function App() {
 
             if (terminalStatus) {
               doneStatus = terminalStatus;
-              doneError = serverMessage.error ?? "";
+              doneError = sanitizeChatErrorMessage(serverMessage.error, "");
               completedFromServer = true;
               controller.abort();
             }
@@ -2146,7 +2241,7 @@ export default function App() {
               }
               if (event.type === "done") {
                 doneStatus = event.status === "error" ? "error" : "complete";
-                doneError = event.error ?? "";
+                doneError = sanitizeChatErrorMessage(event.error, "");
                 if (typeof streamSequence === "number") {
                   updateAssistant(message.id, { streamSequence });
                 }
@@ -2204,9 +2299,7 @@ export default function App() {
 
             if (!response.ok || !response.body) {
               const errorText = await response.text();
-              throw new Error(
-                errorText || `Run resume failed with HTTP ${response.status}.`
-              );
+              throw new Error(formatChatHttpError(response, errorText));
             }
 
             const reader = response.body.getReader();
@@ -2249,7 +2342,7 @@ export default function App() {
                 reasoning,
                 rawStream: raw,
                 streamSequence: lastStreamSequence,
-                error: doneError || "The chat request failed.",
+                error: sanitizeChatErrorMessage(doneError),
                 status: "error"
               });
               return;
