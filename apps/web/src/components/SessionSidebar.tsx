@@ -4,6 +4,7 @@ import {
   Check,
   Download,
   Eraser,
+  Eye,
   KeyRound,
   Menu,
   MoreHorizontal,
@@ -50,6 +51,7 @@ import {
   type SearchProvider,
   type SearchSettings
 } from "../core/searchSettings";
+import type { DisplaySettings } from "../core/displaySettings";
 import {
   getEnvironmentKeyStatus,
   type EnvironmentKeyStatus,
@@ -67,7 +69,7 @@ export type SessionListItem = {
   title: string;
 };
 
-type SettingsSection = "api" | "preferences" | "search";
+type SettingsSection = "api" | "preferences" | "display" | "search";
 
 const COMPACT_SIDEBAR_QUERY = "(max-width: 720px), (orientation: portrait)";
 
@@ -86,6 +88,7 @@ type SessionSidebarProps = {
   themeMode: ThemeMode;
   apiSettings: ApiSettings;
   searchSettings: SearchSettings;
+  displaySettings: DisplaySettings;
   runtimeSettings: RuntimeSettingsSummary | null;
   onNewSession(): void;
   onSelectSession(id: string): void;
@@ -93,6 +96,7 @@ type SessionSidebarProps = {
   onThemeModeChange(mode: ThemeMode): void;
   onApiSettingsChange(settings: ApiSettings): void;
   onSearchSettingsChange(settings: SearchSettings): void;
+  onDisplaySettingsChange(settings: DisplaySettings): void;
 };
 
 function getSearchEnvironmentKeyNames(provider: SearchProvider): string[] {
@@ -179,13 +183,15 @@ export function SessionSidebar({
   themeMode,
   apiSettings,
   searchSettings,
+  displaySettings,
   runtimeSettings,
   onNewSession,
   onSelectSession,
   onDeleteSession,
   onThemeModeChange,
   onApiSettingsChange,
-  onSearchSettingsChange
+  onSearchSettingsChange,
+  onDisplaySettingsChange
 }: SessionSidebarProps) {
   const [isCompactSidebar, setIsCompactSidebar] = useState(
     getInitialSidebarCollapsed
@@ -198,6 +204,8 @@ export function SessionSidebar({
     useState<ApiSettings>(apiSettings);
   const [draftSearchSettings, setDraftSearchSettings] =
     useState<SearchSettings>(searchSettings);
+  const [draftDisplaySettings, setDraftDisplaySettings] =
+    useState<DisplaySettings>(displaySettings);
   const [isModelImportOpen, setIsModelImportOpen] = useState(false);
   const [isModelImportLoading, setIsModelImportLoading] = useState(false);
   const [modelImportError, setModelImportError] = useState<string | null>(null);
@@ -263,9 +271,10 @@ export function SessionSidebar({
     if (isSettingsOpen) {
       setDraftApiSettings(apiSettings);
       setDraftSearchSettings(searchSettings);
+      setDraftDisplaySettings(displaySettings);
       setPreferenceImportError(null);
     }
-  }, [apiSettings, isSettingsOpen, searchSettings]);
+  }, [apiSettings, displaySettings, isSettingsOpen, searchSettings]);
 
   useEffect(() => {
     if (isSending) {
@@ -283,6 +292,10 @@ export function SessionSidebar({
     setDraftSearchSettings((current) =>
       normalizeSearchSettings({ ...current, ...patch })
     );
+  };
+
+  const updateDisplayDraft = (patch: Partial<DisplaySettings>) => {
+    setDraftDisplaySettings((current) => ({ ...current, ...patch }));
   };
 
   const updateUserPreferencePromptDraft = (value: string) => {
@@ -479,6 +492,7 @@ export function SessionSidebar({
   const handleSaveSettings = () => {
     onApiSettingsChange(draftApiSettings);
     onSearchSettingsChange(draftSearchSettings);
+    onDisplaySettingsChange(draftDisplaySettings);
     setIsSettingsOpen(false);
   };
 
@@ -716,6 +730,16 @@ export function SessionSidebar({
               </button>
               <button
                 className={`settings-nav-item ${
+                  settingsSection === "display" ? "is-active" : ""
+                }`}
+                type="button"
+                onClick={() => setSettingsSection("display")}
+              >
+                <Eye size={18} strokeWidth={2.1} aria-hidden="true" />
+                <span>Display</span>
+              </button>
+              <button
+                className={`settings-nav-item ${
                   settingsSection === "search" ? "is-active" : ""
                 }`}
                 type="button"
@@ -733,7 +757,9 @@ export function SessionSidebar({
                     ? "API"
                     : settingsSection === "preferences"
                       ? "User Preferences"
-                      : "Web Search"}
+                      : settingsSection === "display"
+                        ? "Display"
+                        : "Web Search"}
                 </h2>
               </header>
 
@@ -1044,6 +1070,22 @@ export function SessionSidebar({
                         ) : null}
                       </div>
                     </div>
+                  </>
+                ) : settingsSection === "display" ? (
+                  <>
+                    <label className="settings-row">
+                      <span>Raw Stream</span>
+                      <input
+                        className="settings-checkbox"
+                        type="checkbox"
+                        checked={draftDisplaySettings.showRawStream}
+                        onChange={(event) =>
+                          updateDisplayDraft({
+                            showRawStream: event.target.checked
+                          })
+                        }
+                      />
+                    </label>
                   </>
                 ) : (
                   <>

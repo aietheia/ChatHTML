@@ -47,6 +47,12 @@ import {
   loadRuntimeSettings,
   type RuntimeSettingsSummary
 } from "./core/runtimeSettings";
+import {
+  loadDisplaySettings,
+  normalizeDisplaySettings,
+  saveDisplaySettings,
+  type DisplaySettings
+} from "./core/displaySettings";
 import { buildArtifactContext } from "./core/artifactContext";
 import {
   compactEmptySessions,
@@ -711,6 +717,7 @@ type StreamThreadProps = {
   messages: ClientMessage[];
   files: SessionFile[];
   themeMode: ThemeMode;
+  showRawStream: boolean;
   model: string;
   modelOptions: string[];
   reasoningEffort: ReasoningEffort;
@@ -767,6 +774,7 @@ function StreamThread({
   messages,
   files,
   themeMode,
+  showRawStream,
   model,
   modelOptions,
   reasoningEffort,
@@ -899,6 +907,7 @@ function StreamThread({
                   snapshot={clientMessage.snapshot}
                   runtimeErrors={clientMessage.runtimeErrors}
                   themeMode={themeMode}
+                  showRawStream={showRawStream}
                   status={clientMessage.status}
                   error={clientMessage.error}
                   onRuntimeError={onRuntimeError}
@@ -943,6 +952,8 @@ export default function App() {
   const [apiSettings, setApiSettings] = useState<ApiSettings>(loadApiSettings);
   const [searchSettings, setSearchSettings] =
     useState<SearchSettings>(loadSearchSettings);
+  const [displaySettings, setDisplaySettings] =
+    useState<DisplaySettings>(loadDisplaySettings);
   const [runtimeSettings, setRuntimeSettings] =
     useState<RuntimeSettingsSummary | null>(null);
   const [isSending, setIsSending] = useState(false);
@@ -1114,6 +1125,10 @@ export default function App() {
   useEffect(() => {
     saveSearchSettings(searchSettings);
   }, [searchSettings]);
+
+  useEffect(() => {
+    saveDisplaySettings(displaySettings);
+  }, [displaySettings]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1600,6 +1615,10 @@ export default function App() {
 
   const handleSearchSettingsChange = useCallback((next: SearchSettings) => {
     setSearchSettings(normalizeSearchSettings(next));
+  }, []);
+
+  const handleDisplaySettingsChange = useCallback((next: DisplaySettings) => {
+    setDisplaySettings(normalizeDisplaySettings(next));
   }, []);
 
   const handleModelChange = useCallback((model: string) => {
@@ -2563,6 +2582,7 @@ export default function App() {
             themeMode={themeMode}
             apiSettings={apiSettings}
             searchSettings={searchSettings}
+            displaySettings={displaySettings}
             runtimeSettings={runtimeSettings}
             onNewSession={handleNewSession}
             onSelectSession={handleSelectSession}
@@ -2570,6 +2590,7 @@ export default function App() {
             onThemeModeChange={setThemeMode}
             onApiSettingsChange={handleApiSettingsChange}
             onSearchSettingsChange={handleSearchSettingsChange}
+            onDisplaySettingsChange={handleDisplaySettingsChange}
           />
         }
       >
@@ -2578,6 +2599,7 @@ export default function App() {
           messages={messages}
           files={activeFiles}
           themeMode={themeMode}
+          showRawStream={displaySettings.showRawStream}
           model={activeSessionModel}
           modelOptions={selectableModels}
           reasoningEffort={apiSettings.reasoningEffort}

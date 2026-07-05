@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildIframeDocument, getIframeThemeTokens } from "./sandboxDocument";
+import {
+  buildIframeBodyHtml,
+  buildIframeDocument,
+  getIframeThemeTokens
+} from "./sandboxDocument";
 
 describe("sandboxDocument", () => {
   it("creates day and night theme tokens", () => {
@@ -16,6 +20,15 @@ describe("sandboxDocument", () => {
     assert.match(document, /data-page-theme="day"/);
     assert.match(document, /<p>Hello<\/p>/);
     assert.match(document, /source: "streamui-runtime"/);
+  });
+
+  it("builds the same body html used by the live preview patcher", () => {
+    const body = buildIframeBodyHtml("<p>Hello</p>");
+    const document = buildIframeDocument("<p>Hello</p>");
+
+    assert.match(body, /<p>Hello<\/p>/);
+    assert.match(body, /streamui-performance-guard/);
+    assert.match(document, new RegExp(body.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   });
 
   it("includes the prompt action bridge", () => {

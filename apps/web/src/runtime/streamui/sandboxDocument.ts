@@ -73,6 +73,15 @@ export function applyIframeTheme(document: Document, themeMode: PageThemeMode): 
   root.style.setProperty("--streamui-secondary-text", theme.secondaryText);
 }
 
+export function buildIframeBodyHtml(completedHtml: string): string {
+  return `${completedHtml}
+<style id="streamui-performance-guard">
+  *, *::before, *::after {
+    background-attachment: scroll !important;
+  }
+</style>`;
+}
+
 export function buildIframeDocument(
   completedHtml: string,
   themeMode: PageThemeMode = "night"
@@ -398,12 +407,7 @@ export function buildIframeDocument(
   </script>
 </head>
 <body>
-${completedHtml}
-<style id="streamui-performance-guard">
-  *, *::before, *::after {
-    background-attachment: scroll !important;
-  }
-</style>
+${buildIframeBodyHtml(completedHtml)}
 </body>
 </html>`;
 }

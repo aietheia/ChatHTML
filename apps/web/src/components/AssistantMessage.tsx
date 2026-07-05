@@ -23,6 +23,7 @@ type AssistantMessageProps = {
   snapshot?: RenderSnapshot;
   runtimeErrors?: RenderError[];
   themeMode: PageThemeMode;
+  showRawStream: boolean;
   status?: "streaming" | "complete" | "error";
   error?: string;
   onRuntimeError(id: string, error: RenderError): void;
@@ -59,6 +60,7 @@ export function AssistantMessage({
   snapshot,
   runtimeErrors,
   themeMode,
+  showRawStream,
   status,
   error,
   onRuntimeError,
@@ -145,7 +147,7 @@ export function AssistantMessage({
             onArtifactAction={onArtifactAction}
           />
         ) : null}
-        <RawStreamPanel raw={rawStream} />
+        {showRawStream ? <RawStreamPanel raw={rawStream} /> : null}
       </div>
     </MessagePrimitive.Root>
   );

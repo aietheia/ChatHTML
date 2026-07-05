@@ -1,6 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { isIgnoredRuntimeError } from "../core/ignoredRuntimeErrors";
-import { applyIframeTheme } from "../runtime/streamui/sandboxDocument";
+import {
+  applyIframeTheme,
+  buildIframeBodyHtml,
+  buildIframeDocument
+} from "../runtime/streamui/sandboxDocument";
 import type {
   PageThemeMode,
   RenderError,
@@ -22,7 +26,57 @@ export function PreviewFrame({
   onArtifactAction
 }: PreviewFrameProps) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const initialSrcDocRef = useRef<string | null>(null);
+  const lastAppliedBodyHtmlRef = useRef("");
+  const lastExecutedScriptHtmlRef = useRef("");
   const [height, setHeight] = useState(96);
+
+  if (initialSrcDocRef.current === null) {
+    initialSrcDocRef.current = buildIframeDocument("", themeMode);
+  }
+
+  const applySnapshotToFrame = useCallback(() => {
+    const document = frameRef.current?.contentDocument;
+    if (!document?.body) {
+      return;
+    }
+
+    applyIframeTheme(document, themeMode);
+
+    const bodyHtml = buildIframeBodyHtml(snapshot.completedHtml);
+    if (lastAppliedBodyHtmlRef.current !== bodyHtml) {
+      document.body.innerHTML = bodyHtml;
+      lastAppliedBodyHtmlRef.current = bodyHtml;
+
+      if (snapshot.status !== "complete") {
+        lastExecutedScriptHtmlRef.current = "";
+      }
+    }
+
+    if (
+      snapshot.status === "complete" &&
+      lastExecutedScriptHtmlRef.current !== snapshot.completedHtml
+    ) {
+      document.body.querySelectorAll("script").forEach((script) => {
+        const executableScript = document.createElement("script");
+
+        executableScript.async = false;
+        Array.from(script.attributes).forEach((attribute) => {
+          executableScript.setAttribute(attribute.name, attribute.value);
+        });
+        executableScript.text = script.textContent ?? "";
+        script.replaceWith(executableScript);
+      });
+      lastExecutedScriptHtmlRef.current = snapshot.completedHtml;
+    }
+
+    window.requestAnimationFrame(() => {
+      const nextHeight = Math.max(32, Math.ceil(document.body.scrollHeight));
+      setHeight((currentHeight) =>
+        Math.abs(nextHeight - currentHeight) > 1 ? nextHeight : currentHeight
+      );
+    });
+  }, [snapshot.completedHtml, snapshot.status, themeMode]);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -90,13 +144,8 @@ export function PreviewFrame({
   }, [onArtifactAction, onRuntimeError]);
 
   useEffect(() => {
-    const document = frameRef.current?.contentDocument;
-    if (!document?.body) {
-      return;
-    }
-
-    applyIframeTheme(document, themeMode);
-  }, [snapshot.iframeDocument, themeMode]);
+    applySnapshotToFrame();
+  }, [applySnapshotToFrame]);
 
   return (
     <iframe
@@ -104,12 +153,11 @@ export function PreviewFrame({
       className="preview-frame"
       title="StreamUI artifact preview"
       sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-      srcDoc={snapshot.iframeDocument}
+      srcDoc={initialSrcDocRef.current}
       onLoad={() => {
-        const document = frameRef.current?.contentDocument;
-        if (document?.body) {
-          applyIframeTheme(document, themeMode);
-        }
+        lastAppliedBodyHtmlRef.current = "";
+        lastExecutedScriptHtmlRef.current = "";
+        applySnapshotToFrame();
       }}
       style={{ height }}
     />
