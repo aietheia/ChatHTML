@@ -154,8 +154,115 @@ export function compactEmptySessions(
   };
 }
 
+function latestStreamingAssistant(
+  session: ChatSession | undefined
+): ClientMessage | undefined {
+  if (!session) {
+    return undefined;
+  }
+
+  for (let index = session.messages.length - 1; index >= 0; index -= 1) {
+    const message = session.messages[index];
+    if (message.role === "assistant" && message.status === "streaming") {
+      return message;
+    }
+  }
+
+  return undefined;
+}
+
+function matchingServerMessage(
+  serverSession: ChatSession | undefined,
+  localMessage: ClientMessage
+): ClientMessage | undefined {
+  if (!serverSession) {
+    return undefined;
+  }
+
+  return serverSession.messages.find(
+    (message) =>
+      message.id === localMessage.id ||
+      (Boolean(localMessage.generationRunId) &&
+        message.generationRunId === localMessage.generationRunId)
+  );
+}
+
+function shouldPreserveLocalStreamingSession(
+  currentSession: ChatSession | undefined,
+  serverSession: ChatSession | undefined
+): boolean {
+  const localStreaming = latestStreamingAssistant(currentSession);
+  if (!currentSession || !localStreaming) {
+    return false;
+  }
+
+  const serverMessage = matchingServerMessage(serverSession, localStreaming);
+  return serverMessage?.status !== "complete" && serverMessage?.status !== "error";
+}
+
+export function mergeSyncedSessionState(
+  current: SessionState,
+  serverState: SessionState
+): SessionState {
+  const currentActive = current.sessions.find(
+    (session) => session.id === current.activeSessionId
+  );
+  const serverActive = serverState.sessions.find(
+    (session) => session.id === current.activeSessionId
+  );
+
+  if (
+    currentActive &&
+    shouldPreserveLocalStreamingSession(currentActive, serverActive)
+  ) {
+    const activeId = currentActive.id;
+    return compactEmptySessions({
+      sessions: sortSessions([
+        currentActive,
+        ...serverState.sessions.filter((session) => session.id !== activeId)
+      ]),
+      activeSessionId: activeId
+    });
+  }
+
+  if (
+    currentActive &&
+    isSessionEmpty(currentActive) &&
+    (!serverActive || isSessionEmpty(serverActive))
+  ) {
+    const activeId = currentActive.id;
+    return compactEmptySessions(
+      {
+        sessions: [
+          currentActive,
+          ...serverState.sessions.filter(
+            (session) => session.id !== activeId
+          )
+        ],
+        activeSessionId: activeId
+      },
+      { preserveActiveEmpty: true }
+    );
+  }
+
+  const activeSessionId = serverState.sessions.some(
+    (session) => session.id === current.activeSessionId
+  )
+    ? current.activeSessionId
+    : serverState.activeSessionId;
+
+  return compactEmptySessions({
+    ...serverState,
+    activeSessionId
+  });
+}
+
 function compactText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+export function stripLegacyArtifactActionPrefix(value: string): string {
+  return value.replace(/^I clicked\s+"[^"\n]{1,200}"\.\s*/u, "").trim();
 }
 
 export function titleFromText(value: string): string {
@@ -620,7 +727,12 @@ export function normalizeStoredMessage(message: unknown): ClientMessage | null {
   return rebuildAssistantSnapshot({
     id: input.id,
     role: input.role,
-    content: typeof input.content === "string" ? input.content : "",
+    content:
+      input.role === "user" && typeof input.content === "string"
+        ? stripLegacyArtifactActionPrefix(input.content)
+        : typeof input.content === "string"
+          ? input.content
+          : "",
     attachments: Array.isArray(input.attachments) ? input.attachments : undefined,
     fileIds: normalizeStringArray(input.fileIds),
     reasoning: typeof input.reasoning === "string" ? input.reasoning : undefined,

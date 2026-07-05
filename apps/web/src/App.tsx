@@ -56,6 +56,7 @@ import {
   hasPersistedMessages,
   initialMessages,
   isSessionEmpty,
+  mergeSyncedSessionState,
   normalizeStoredSession,
   normalizeStoredSessionState,
   serializeSessions,
@@ -431,48 +432,6 @@ function formatChatHttpError(response: Response, bodyText: string): string {
   }
 
   return `${prefix} ${detail}`;
-}
-
-function mergeSyncedSessionState(
-  current: SessionState,
-  serverState: SessionState
-): SessionState {
-  const currentActive = current.sessions.find(
-    (session) => session.id === current.activeSessionId
-  );
-  const serverActive = serverState.sessions.find(
-    (session) => session.id === current.activeSessionId
-  );
-
-  if (
-    currentActive &&
-    isSessionEmpty(currentActive) &&
-    (!serverActive || isSessionEmpty(serverActive))
-  ) {
-    return compactEmptySessions(
-      {
-        sessions: [
-          currentActive,
-          ...serverState.sessions.filter(
-            (session) => session.id !== currentActive.id
-          )
-        ],
-        activeSessionId: currentActive.id
-      },
-      { preserveActiveEmpty: true }
-    );
-  }
-
-  const activeSessionId = serverState.sessions.some(
-    (session) => session.id === current.activeSessionId
-  )
-    ? current.activeSessionId
-    : serverState.activeSessionId;
-
-  return compactEmptySessions({
-    ...serverState,
-    activeSessionId
-  });
 }
 
 function renderErrorKey(error: Pick<RenderError, "kind" | "message">): string {

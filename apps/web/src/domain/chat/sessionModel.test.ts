@@ -7,9 +7,11 @@ import {
   createInitialSessionState,
   hasPersistedMessages,
   isSessionEmpty,
+  mergeSyncedSessionState,
   normalizeStoredMessage,
   normalizeStoredSessionState,
   serializeSessions,
+  stripLegacyArtifactActionPrefix,
   summarizeSession,
   titleFromText,
   type ChatSession,
@@ -272,6 +274,100 @@ describe("sessionModel", () => {
     assert.equal(compacted.activeSessionId, "empty-new");
   });
 
+  it("preserves a local active streaming run over stale server sync", () => {
+    const local = mergeSyncedSessionState(
+      {
+        activeSessionId: "s1",
+        sessions: [
+          {
+            id: "s1",
+            title: "Local",
+            createdAt: 1,
+            updatedAt: 20,
+            files: [],
+            messages: [
+              { id: "u1", role: "user", content: "continue", status: "complete" },
+              {
+                id: "a1",
+                role: "assistant",
+                content: "",
+                generationRunId: "run-1",
+                streamSequence: 2,
+                status: "streaming"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        activeSessionId: "s1",
+        sessions: [
+          {
+            id: "s1",
+            title: "Server stale",
+            createdAt: 1,
+            updatedAt: 10,
+            files: [],
+            messages: []
+          }
+        ]
+      }
+    );
+
+    assert.equal(local.sessions[0].title, "Local");
+    assert.equal(local.sessions[0].messages[1].generationRunId, "run-1");
+  });
+
+  it("allows completed server runs to replace local streaming state", () => {
+    const merged = mergeSyncedSessionState(
+      {
+        activeSessionId: "s1",
+        sessions: [
+          {
+            id: "s1",
+            title: "Local streaming",
+            createdAt: 1,
+            updatedAt: 20,
+            files: [],
+            messages: [
+              {
+                id: "a1",
+                role: "assistant",
+                content: "",
+                generationRunId: "run-1",
+                status: "streaming"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        activeSessionId: "s1",
+        sessions: [
+          {
+            id: "s1",
+            title: "Server complete",
+            createdAt: 1,
+            updatedAt: 30,
+            files: [],
+            messages: [
+              {
+                id: "a1",
+                role: "assistant",
+                content: "done",
+                generationRunId: "run-1",
+                status: "complete"
+              }
+            ]
+          }
+        ]
+      }
+    );
+
+    assert.equal(merged.sessions[0].title, "Server complete");
+    assert.equal(merged.sessions[0].messages[0].content, "done");
+  });
+
   it("normalizes and serializes per-session model choices", () => {
     const state = normalizeStoredSessionState({
       activeSessionId: "s1",
@@ -319,6 +415,23 @@ describe("sessionModel", () => {
       }),
       true
     );
+  });
+
+  it("strips legacy artifact action click prefixes from user messages", () => {
+    assert.equal(
+      stripLegacyArtifactActionPrefix(
+        'I clicked "脱因工艺详解". 详细说说瑞士水洗低因是怎么脱因的。'
+      ),
+      "详细说说瑞士水洗低因是怎么脱因的。"
+    );
+
+    const message = normalizeStoredMessage({
+      id: "u1",
+      role: "user",
+      content: 'I clicked "展开细节".\n\n请继续。'
+    });
+
+    assert.equal(message?.content, "请继续。");
   });
 
   it("serializes sessions without transient snapshots and preserves active streams", () => {
