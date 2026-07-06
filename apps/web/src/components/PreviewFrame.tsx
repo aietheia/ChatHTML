@@ -33,6 +33,10 @@ type CapabilityStatus = {
   message: string;
 };
 
+type PreviewFrameWindow = Window & {
+  __streamuiExecutedScriptHtml?: string;
+};
+
 const MAX_CAPABILITY_TEXT_CHARS = 1_000_000;
 
 function normalizeCapabilityText(value: unknown): string {
@@ -109,6 +113,7 @@ export function PreviewFrame({
 }: PreviewFrameProps) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const initialSrcDocRef = useRef<string | null>(null);
+  const frameWindowRef = useRef<Window | null>(null);
   const lastAppliedBodyHtmlRef = useRef("");
   const lastExecutedScriptHtmlRef = useRef("");
   const [height, setHeight] = useState(96);
@@ -122,9 +127,17 @@ export function PreviewFrame({
   }
 
   const applySnapshotToFrame = useCallback(() => {
-    const document = frameRef.current?.contentDocument;
+    const frame = frameRef.current;
+    const document = frame?.contentDocument;
     if (!document?.body) {
       return;
+    }
+
+    const frameWindow = frame?.contentWindow ?? null;
+    if (frameWindowRef.current !== frameWindow) {
+      frameWindowRef.current = frameWindow;
+      lastAppliedBodyHtmlRef.current = "";
+      lastExecutedScriptHtmlRef.current = "";
     }
 
     applyIframeTheme(document, themeMode);
@@ -143,17 +156,25 @@ export function PreviewFrame({
       snapshot.status === "complete" &&
       lastExecutedScriptHtmlRef.current !== snapshot.completedHtml
     ) {
-      document.body.querySelectorAll("script").forEach((script) => {
-        const executableScript = document.createElement("script");
+      const executionWindow = frameWindow as PreviewFrameWindow | null;
+      if (executionWindow?.__streamuiExecutedScriptHtml === snapshot.completedHtml) {
+        lastExecutedScriptHtmlRef.current = snapshot.completedHtml;
+      } else {
+        lastExecutedScriptHtmlRef.current = snapshot.completedHtml;
+        if (executionWindow) {
+          executionWindow.__streamuiExecutedScriptHtml = snapshot.completedHtml;
+        }
+        document.body.querySelectorAll("script").forEach((script) => {
+          const executableScript = document.createElement("script");
 
-        executableScript.async = false;
-        Array.from(script.attributes).forEach((attribute) => {
-          executableScript.setAttribute(attribute.name, attribute.value);
+          executableScript.async = false;
+          Array.from(script.attributes).forEach((attribute) => {
+            executableScript.setAttribute(attribute.name, attribute.value);
+          });
+          executableScript.text = script.textContent ?? "";
+          script.replaceWith(executableScript);
         });
-        executableScript.text = script.textContent ?? "";
-        script.replaceWith(executableScript);
-      });
-      lastExecutedScriptHtmlRef.current = snapshot.completedHtml;
+      }
     }
 
     window.requestAnimationFrame(() => {
@@ -388,8 +409,12 @@ export function PreviewFrame({
         sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
         srcDoc={initialSrcDocRef.current}
         onLoad={() => {
-          lastAppliedBodyHtmlRef.current = "";
-          lastExecutedScriptHtmlRef.current = "";
+          const frameWindow = frameRef.current?.contentWindow ?? null;
+          if (frameWindowRef.current !== frameWindow) {
+            frameWindowRef.current = frameWindow;
+            lastAppliedBodyHtmlRef.current = "";
+            lastExecutedScriptHtmlRef.current = "";
+          }
           applySnapshotToFrame();
         }}
         style={{ height }}
