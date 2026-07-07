@@ -16,8 +16,18 @@ export type ArtifactShareRecord = {
   sourceMessageId?: string;
 };
 
+export type ArtifactSharePublishResult = {
+  experimental: false;
+  id: string;
+  path: string;
+  record: ArtifactShareRecord;
+  reused: boolean;
+  url: string;
+};
+
 const ARTIFACT_SHARE_MAX_DOCUMENT_CHARS = 5_000_000;
 const ARTIFACT_SHARE_ID_PATTERN = /^share-[a-z0-9-]{12,80}$/;
+const DEFAULT_PUBLIC_ORIGIN = "http://127.0.0.1:8787";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 const workspaceRoot = path.resolve(projectRoot, "../..");
@@ -81,6 +91,34 @@ function getRequestOrigin(req: Request): string {
   return `${protocol}://${host}`;
 }
 
+function normalizePublicOrigin(input: string): string {
+  return input.trim().replace(/\/+$/, "") || DEFAULT_PUBLIC_ORIGIN;
+}
+
+export function getArtifactSharePath(id: string): string {
+  if (!ARTIFACT_SHARE_ID_PATTERN.test(id)) {
+    throw new ArtifactShareError(404, "Artifact share not found.");
+  }
+
+  return `/artifacts/${encodeURIComponent(id)}`;
+}
+
+export function getArtifactSharePublicOrigin(): string {
+  return normalizePublicOrigin(
+    process.env.CHATHTML_PUBLIC_URL ||
+      process.env.STREAMUI_PUBLIC_URL ||
+      process.env.PUBLIC_URL ||
+      DEFAULT_PUBLIC_ORIGIN
+  );
+}
+
+export function getArtifactSharePublicUrl(
+  id: string,
+  origin = getArtifactSharePublicOrigin()
+): string {
+  return `${normalizePublicOrigin(origin)}${getArtifactSharePath(id)}`;
+}
+
 function createRecord(input: unknown): ArtifactShareRecord {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new ArtifactShareError(400, "Artifact share payload is required.");
@@ -88,11 +126,14 @@ function createRecord(input: unknown): ArtifactShareRecord {
 
   const body = input as {
     document?: unknown;
+    html?: unknown;
     sourceMessageId?: unknown;
     themeMode?: unknown;
     title?: unknown;
   };
-  const document = getString(body.document);
+  const documentInput = getString(body.document);
+  const htmlInput = getString(body.html);
+  const document = documentInput.trim() ? documentInput : htmlInput;
   if (!document.trim()) {
     throw new ArtifactShareError(400, "Artifact document is required.");
   }
@@ -136,7 +177,7 @@ async function findShareRecordBySourceMessageId(
         return record;
       }
     } catch {
-      // Ignore stale or malformed experimental share records.
+      // Ignore stale or malformed share records.
     }
   }
 
@@ -275,10 +316,10 @@ export function createArtifactSharePageHtml(record: ArtifactShareRecord): string
   <main class="share-shell">
     <header class="share-header">
       <div class="share-title">${title}</div>
-      <div class="share-badge">Experimental</div>
+      <div class="share-badge">ChatHTML</div>
     </header>
     <section class="share-main">
-      <iframe id="artifact-frame" title="${title}" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads" referrerpolicy="no-referrer"></iframe>
+      <iframe id="artifact-frame" title="${title}" sandbox="allow-scripts allow-forms allow-popups allow-downloads" referrerpolicy="no-referrer"></iframe>
     </section>
   </main>
   <script id="artifact-document" type="application/json">${safeJsonScript(
@@ -325,6 +366,24 @@ async function writeShareRecord(record: ArtifactShareRecord): Promise<void> {
   });
 }
 
+export async function publishArtifactShare(
+  input: unknown,
+  origin = getArtifactSharePublicOrigin()
+): Promise<ArtifactSharePublishResult> {
+  const { record, reused } = await createOrUpdateArtifactShareRecord(input);
+  await writeShareRecord(record);
+  const path = getArtifactSharePath(record.id);
+
+  return {
+    experimental: false,
+    id: record.id,
+    path,
+    record,
+    reused,
+    url: `${normalizePublicOrigin(origin)}${path}`
+  };
+}
+
 async function readShareRecord(id: string): Promise<ArtifactShareRecord> {
   try {
     return JSON.parse(await readFile(getSharePath(id), "utf8")) as ArtifactShareRecord;
@@ -349,15 +408,13 @@ export async function handleCreateArtifactShare(
   res: Response
 ): Promise<void> {
   try {
-    const { record, reused } = await createOrUpdateArtifactShareRecord(req.body);
-    await writeShareRecord(record);
-    const path = `/experimental/artifacts/${encodeURIComponent(record.id)}`;
-    res.status(reused ? 200 : 201).json({
-      experimental: true,
-      id: record.id,
-      path,
-      reused,
-      url: `${getRequestOrigin(req)}${path}`
+    const result = await publishArtifactShare(req.body, getRequestOrigin(req));
+    res.status(result.reused ? 200 : 201).json({
+      experimental: result.experimental,
+      id: result.id,
+      path: result.path,
+      reused: result.reused,
+      url: result.url
     });
   } catch (error) {
     res.status(getErrorStatus(error)).json({ error: getErrorMessage(error) });

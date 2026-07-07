@@ -57,7 +57,7 @@ const MENU_ACTIONS: MenuAction[] = [
   {
     action: "create-share-link",
     icon: Share2,
-    label: "Share Link (Experimental)"
+    label: "Share Link"
   },
   { action: "download-html", icon: FileText, label: "Download HTML" },
   { action: "download-png", icon: ImageDown, label: "Download PNG" },
@@ -99,14 +99,14 @@ async function createArtifactShareLink({
   snapshot: RenderSnapshot;
   themeMode: PageThemeMode;
 }): Promise<{ copied: boolean; url: string }> {
-  const response = await fetch("/api/experimental/artifact-shares", {
+  const response = await fetch("/api/html-shares", {
     method: "POST",
     credentials: "same-origin",
     headers: {
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      document: getSnapshotHtmlDocument(snapshot, themeMode),
+      html: getSnapshotHtmlDocument(snapshot, themeMode),
       sourceMessageId: filenameBase,
       themeMode,
       title: filenameBase

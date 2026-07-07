@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createArtifactSharePageHtml,
+  createOrUpdateArtifactShareRecord,
+  getArtifactSharePath,
+  getArtifactSharePublicUrl,
   reuseArtifactShareRecord
 } from "../../server/artifactShares.js";
 
-test("artifact share page marks the feature experimental and embeds the document safely", () => {
+test("artifact share page embeds the document safely", () => {
   const html = createArtifactSharePageHtml({
     id: "share-example-123456",
     title: "Demo <Artifact>",
@@ -15,13 +18,35 @@ test("artifact share page marks the feature experimental and embeds the document
     sourceMessageId: "message-1"
   });
 
-  assert.match(html, /Experimental/);
+  assert.match(html, /ChatHTML/);
   assert.match(html, /Demo &lt;Artifact&gt;/);
   assert.doesNotMatch(html, /<script>window\.__ok = true;<\/script>/);
   assert.doesNotMatch(html, /\|\| """"/);
   assert.match(html, /JSON\.parse\(documentPayload\.textContent \|\| '""'\)/);
   assert.match(html, /\\u003cscript>window\.__ok = true;\\u003c\/script>/);
-  assert.match(html, /sandbox="allow-scripts allow-same-origin/);
+  assert.match(html, /sandbox="allow-scripts allow-forms/);
+  assert.doesNotMatch(html, /allow-same-origin/);
+});
+
+test("artifact share public URLs use the stable artifact path", () => {
+  assert.equal(
+    getArtifactSharePath("share-example-123456"),
+    "/artifacts/share-example-123456"
+  );
+  assert.equal(
+    getArtifactSharePublicUrl("share-example-123456", "https://chathtml.test/"),
+    "https://chathtml.test/artifacts/share-example-123456"
+  );
+});
+
+test("artifact share records accept html as the public payload field", async () => {
+  const { record } = await createOrUpdateArtifactShareRecord({
+    html: "<!doctype html><p>Hello</p>",
+    title: "HTML payload"
+  });
+
+  assert.equal(record.document, "<!doctype html><p>Hello</p>");
+  assert.equal(record.title, "HTML payload");
 });
 
 test("artifact share reuse preserves the original link id", () => {
