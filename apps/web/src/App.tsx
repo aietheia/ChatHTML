@@ -17,6 +17,7 @@ import {
   type SessionListItem,
   type ThemeMode
 } from "./components/SessionSidebar";
+import { AuthOverlay } from "./components/AuthOverlay";
 import {
   StreamImageAttachmentAdapter,
   completeAttachmentToImage,
@@ -47,6 +48,12 @@ import {
   loadRuntimeSettings,
   type RuntimeSettingsSummary
 } from "./core/runtimeSettings";
+import {
+  loadAuthSummary,
+  logout as logoutAuth,
+  type AuthSummary,
+  type AuthUser
+} from "./core/cloudAuth";
 import {
   loadDisplaySettings,
   normalizeDisplaySettings,
@@ -136,6 +143,12 @@ type SendStreamUiRequestOptions = {
     userMessage: ClientMessage,
     assistantMessage: ClientMessage
   ) => ClientMessage[];
+};
+
+type PendingManagedRequest = {
+  text: string;
+  attachments: ImageAttachment[];
+  options: SendStreamUiRequestOptions;
 };
 
 type PendingArtifactAction = {
@@ -1143,6 +1156,9 @@ export default function App() {
     useState<SessionListPreview | null>(loadCachedSessionListPreview);
   const [runtimeSettings, setRuntimeSettings] =
     useState<RuntimeSettingsSummary | null>(null);
+  const [authSummary, setAuthSummary] = useState<AuthSummary | null>(null);
+  const [authLoaded, setAuthLoaded] = useState(false);
+  const [isAuthOverlayOpen, setIsAuthOverlayOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [attachmentUploadGate, setAttachmentUploadGate] = useState<{
     inFlight: number;
@@ -1162,6 +1178,8 @@ export default function App() {
   );
   const activeFiles = activeSession?.files ?? [];
   const activeSessionModel = activeSession?.model || apiSettings.model;
+  const cloudEnabled = Boolean(runtimeSettings?.cloud?.enabled);
+  const authenticatedUser = cloudEnabled ? (authSummary?.user ?? null) : null;
   const selectableModels = useMemo(
     () =>
       getSelectableModelOptions(
@@ -1187,6 +1205,7 @@ export default function App() {
   );
   const renderersRef = useRef<Map<string, StreamingRenderer>>(new Map());
   const runConnectionsRef = useRef<Map<string, AbortController>>(new Map());
+  const pendingManagedRequestRef = useRef<PendingManagedRequest | null>(null);
   const pendingArtifactActionRef = useRef<PendingArtifactAction | null>(null);
   const attachmentAdapter = useMemo(
     () =>
@@ -1247,6 +1266,70 @@ export default function App() {
     },
     []
   );
+  const refreshAuthSummary = useCallback(async () => {
+    if (!cloudEnabled) {
+      setAuthSummary(null);
+      setAuthLoaded(false);
+      return null;
+    }
+
+    const summary = await loadAuthSummary();
+    setAuthSummary(summary);
+    setAuthLoaded(true);
+    return summary;
+  }, [cloudEnabled]);
+  const handleAuthChange = useCallback((summary: AuthSummary) => {
+    setAuthSummary(summary);
+    setAuthLoaded(true);
+    setIsAuthOverlayOpen(false);
+  }, []);
+  const handleAuthOverlayRequest = useCallback(() => {
+    pendingManagedRequestRef.current = null;
+    setIsAuthOverlayOpen(true);
+  }, []);
+  const handleAuthOverlayClose = useCallback(() => {
+    pendingManagedRequestRef.current = null;
+    setIsAuthOverlayOpen(false);
+  }, []);
+  const handleLogout = useCallback(async () => {
+    try {
+      const summary = await logoutAuth();
+      setAuthSummary(summary);
+    } catch (error) {
+      console.warn("Could not sign out of ChatHTML Cloud.", error);
+      setAuthSummary((current) =>
+        current
+          ? { ...current, user: null }
+          : {
+              user: null,
+              auth: {
+                available: false,
+                requiresInvite: false,
+                firstUser: false
+              }
+            }
+      );
+    } finally {
+      setAuthLoaded(true);
+      setIsAuthOverlayOpen(false);
+      pendingManagedRequestRef.current = null;
+    }
+  }, []);
+  const handleAuthUserChange = useCallback((user: AuthUser) => {
+    setAuthSummary((current) =>
+      current
+        ? { ...current, user }
+        : {
+            user,
+            auth: {
+              available: true,
+              requiresInvite: false,
+              firstUser: false
+            }
+          }
+    );
+    setAuthLoaded(true);
+  }, []);
 
   useEffect(() => {
     sessionStateRef.current = sessionState;
@@ -1307,6 +1390,43 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!cloudEnabled) {
+      setAuthSummary(null);
+      setAuthLoaded(false);
+      setIsAuthOverlayOpen(false);
+      pendingManagedRequestRef.current = null;
+      return undefined;
+    }
+
+    let cancelled = false;
+    loadAuthSummary()
+      .then((summary) => {
+        if (!cancelled) {
+          setAuthSummary(summary);
+          setAuthLoaded(true);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.warn("Could not load ChatHTML Cloud account.", error);
+          setAuthSummary({
+            user: null,
+            auth: {
+              available: false,
+              requiresInvite: false,
+              firstUser: false
+            }
+          });
+          setAuthLoaded(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cloudEnabled]);
 
   useEffect(() => {
     saveApiSettings(apiSettings);
@@ -1967,6 +2087,19 @@ export default function App() {
         ...apiSettings,
         model: requestModel
       });
+      if (
+        requestApiSettings.apiKeySource === "managed" &&
+        cloudEnabled &&
+        !authenticatedUser
+      ) {
+        pendingManagedRequestRef.current = {
+          text,
+          attachments,
+          options
+        };
+        setIsAuthOverlayOpen(true);
+        return;
+      }
       const userMessageId = createId("user");
       const previousMessages = getVisibleSessionMessages(requestSessionForModel);
       const uploadedFiles = attachments
@@ -2369,11 +2502,19 @@ export default function App() {
         renderersRef.current.delete(assistantId);
         runConnectionsRef.current.delete(generationRunId);
         setIsSending(runConnectionsRef.current.size > 0);
+        if (requestApiSettings.apiKeySource === "managed") {
+          void refreshAuthSummary().catch((error) => {
+            console.warn("Could not refresh ChatHTML Cloud account.", error);
+          });
+        }
       }
     },
     [
       apiSettings,
+      authenticatedUser,
+      cloudEnabled,
       handleMemoryStreamEvent,
+      refreshAuthSummary,
       searchSettings,
       themeMode,
       updateAssistant,
@@ -2916,6 +3057,21 @@ export default function App() {
     updateAssistant
   ]);
 
+  useEffect(() => {
+    if (!cloudEnabled || !authenticatedUser || !sessionsLoaded) {
+      return;
+    }
+
+    const pending = pendingManagedRequestRef.current;
+    if (!pending) {
+      return;
+    }
+
+    pendingManagedRequestRef.current = null;
+    setIsAuthOverlayOpen(false);
+    void sendStreamUiRequest(pending.text, pending.attachments, pending.options);
+  }, [authenticatedUser, cloudEnabled, sendStreamUiRequest, sessionsLoaded]);
+
   const handleNewMessage = useCallback(
     async (message: AppendMessage) => {
       if (
@@ -2982,48 +3138,63 @@ export default function App() {
   }, [sessionState, sessionsLoaded]);
 
   return (
-    <AssistantRuntimeProvider runtime={runtime}>
-      <ChatShell
-        themeMode={themeMode}
-        sidebar={
-          <SessionSidebar
-            sessions={sidebarSessionItems}
-            activeSessionId={sidebarActiveSessionId}
-            isSending={isSending}
-            themeMode={themeMode}
-            apiSettings={apiSettings}
-            searchSettings={searchSettings}
-            displaySettings={displaySettings}
-            runtimeSettings={runtimeSettings}
-            onNewSession={handleNewSession}
-            onSelectSession={handleSelectSession}
-            onDeleteSession={handleDeleteSession}
-            onThemeModeChange={setThemeMode}
-            onApiSettingsChange={handleApiSettingsChange}
-            onSearchSettingsChange={handleSearchSettingsChange}
-            onDisplaySettingsChange={handleDisplaySettingsChange}
-          />
-        }
-      >
-        <StreamThread
-          activeSessionId={sessionState.activeSessionId}
-          messages={messages}
-          files={activeFiles}
-          getBranchInfo={getBranchInfo}
+    <>
+      <AssistantRuntimeProvider runtime={runtime}>
+        <ChatShell
           themeMode={themeMode}
-          showRawStream={displaySettings.showRawStream}
-          model={activeSessionModel}
-          modelOptions={selectableModels}
-          reasoningEffort={apiSettings.reasoningEffort}
-          onRuntimeError={handleRuntimeError}
-          onArtifactAction={handleArtifactAction}
-          onRegenerateAssistant={handleRegenerateAssistant}
-          onEditUserMessage={handleEditUserMessage}
-          onSelectBranch={handleSelectBranch}
-          onModelChange={handleModelChange}
-          onReasoningEffortChange={handleReasoningEffortChange}
+          sidebar={
+            <SessionSidebar
+              sessions={sidebarSessionItems}
+              activeSessionId={sidebarActiveSessionId}
+              isSending={isSending}
+              themeMode={themeMode}
+              apiSettings={apiSettings}
+              searchSettings={searchSettings}
+              displaySettings={displaySettings}
+              runtimeSettings={runtimeSettings}
+              cloudEnabled={cloudEnabled}
+              authUser={authenticatedUser}
+              onNewSession={handleNewSession}
+              onSelectSession={handleSelectSession}
+              onDeleteSession={handleDeleteSession}
+              onThemeModeChange={setThemeMode}
+              onApiSettingsChange={handleApiSettingsChange}
+              onSearchSettingsChange={handleSearchSettingsChange}
+              onDisplaySettingsChange={handleDisplaySettingsChange}
+              onAuthUserChange={handleAuthUserChange}
+              onLoginRequest={handleAuthOverlayRequest}
+              onLogout={handleLogout}
+            />
+          }
+        >
+          <StreamThread
+            activeSessionId={sessionState.activeSessionId}
+            messages={messages}
+            files={activeFiles}
+            getBranchInfo={getBranchInfo}
+            themeMode={themeMode}
+            showRawStream={displaySettings.showRawStream}
+            model={activeSessionModel}
+            modelOptions={selectableModels}
+            reasoningEffort={apiSettings.reasoningEffort}
+            onRuntimeError={handleRuntimeError}
+            onArtifactAction={handleArtifactAction}
+            onRegenerateAssistant={handleRegenerateAssistant}
+            onEditUserMessage={handleEditUserMessage}
+            onSelectBranch={handleSelectBranch}
+            onModelChange={handleModelChange}
+            onReasoningEffortChange={handleReasoningEffortChange}
+          />
+        </ChatShell>
+      </AssistantRuntimeProvider>
+      {cloudEnabled && isAuthOverlayOpen ? (
+        <AuthOverlay
+          authSummary={authSummary}
+          isLoading={!authLoaded}
+          onAuthChange={handleAuthChange}
+          onClose={handleAuthOverlayClose}
         />
-      </ChatShell>
-    </AssistantRuntimeProvider>
+      ) : null}
+    </>
   );
 }

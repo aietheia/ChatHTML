@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { createRequire } from "node:module";
 
-export type ApiKeySource = "environment" | "manual";
+export type ApiKeySource = "environment" | "manual" | "managed";
 
 export type RuntimeReasoningEffort =
   | "none"
@@ -64,6 +64,13 @@ export type RuntimeSettingsSummary = {
   api: {
     defaults: RuntimeApiDefaults;
     environmentKeys: EnvironmentKeyStatus[];
+  };
+  cloud?: {
+    enabled: boolean;
+    authRequired: boolean;
+    billingEnabled: boolean;
+    managedProviderEnabled: boolean;
+    brandName: string;
   };
   search: {
     environmentKeys: EnvironmentKeyStatus[];
@@ -287,6 +294,13 @@ export function getRuntimeSettingsSummary(): RuntimeSettingsSummary {
       defaults: getRuntimeApiDefaults(),
       environmentKeys: environmentKeyStatus(API_ENV_KEYS)
     },
+    cloud: {
+      enabled: false,
+      authRequired: false,
+      billingEnabled: false,
+      managedProviderEnabled: false,
+      brandName: "ChatHTML Cloud"
+    },
     search: {
       environmentKeys: environmentKeyStatus(SEARCH_ENV_KEYS),
       defaultProvider: normalizeSearchProvider(
@@ -325,7 +339,7 @@ export function normalizeBaseUrl(value: unknown): string {
 }
 
 export function normalizeApiKeySource(value: unknown): ApiKeySource {
-  if (value === "environment" || value === "manual") {
+  if (value === "environment" || value === "manual" || value === "managed") {
     return value;
   }
 
@@ -342,6 +356,12 @@ export function getApiKeyEnvironmentName(
   const normalizedProviderName = providerName.toLowerCase();
   const normalizedBaseUrl = baseUrl.toLowerCase();
 
+  if (
+    normalizedProviderId === "chathtml-cloud" ||
+    normalizedProviderName.includes("chathtml cloud")
+  ) {
+    return "CHATHTML_CLOUD_API_KEY";
+  }
   if (
     normalizedProviderId === "openrouter" ||
     normalizedProviderName.includes("openrouter") ||
@@ -366,21 +386,34 @@ export function readRuntimeApiCredentials(input: unknown): RuntimeApiCredentials
     typeof input === "object" && input !== null
       ? (input as Record<string, unknown>)
       : {};
-  const providerName =
-    typeof object.providerName === "string" && object.providerName.trim()
-      ? object.providerName.trim().slice(0, 80)
-      : defaults.providerName;
-  const baseUrl = normalizeBaseUrl(object.baseUrl);
-  const effectiveBaseUrl =
-    baseUrl || (hasOwn(object, "baseUrl") ? "" : defaults.baseUrl);
+  const requestedProviderId = hasOwn(object, "providerId")
+    ? object.providerId
+    : defaults.providerId;
   const apiKeySource = normalizeApiKeySource(object.apiKeySource);
+  const isManagedProvider =
+    requestedProviderId === "chathtml-cloud" || apiKeySource === "managed";
+  const providerName =
+    isManagedProvider
+      ? "ChatHTML Cloud"
+      : typeof object.providerName === "string" && object.providerName.trim()
+        ? object.providerName.trim().slice(0, 80)
+        : defaults.providerName;
+  const baseUrl = isManagedProvider ? "" : normalizeBaseUrl(object.baseUrl);
+  const effectiveBaseUrl = isManagedProvider
+    ? ""
+    : baseUrl || (hasOwn(object, "baseUrl") ? "" : defaults.baseUrl);
+  const effectiveApiKeySource: ApiKeySource = isManagedProvider
+    ? "managed"
+    : apiKeySource;
   const apiKeyEnvironmentName = getApiKeyEnvironmentName(
     providerName,
     effectiveBaseUrl,
-    hasOwn(object, "providerId") ? object.providerId : defaults.providerId
+    requestedProviderId
   );
   const apiKey =
-    apiKeySource === "environment"
+    effectiveApiKeySource === "managed"
+      ? ""
+      : effectiveApiKeySource === "environment"
       ? process.env[apiKeyEnvironmentName]?.trim() ?? ""
       : typeof object.apiKey === "string"
         ? object.apiKey.trim()
@@ -389,7 +422,7 @@ export function readRuntimeApiCredentials(input: unknown): RuntimeApiCredentials
   return {
     providerName,
     baseUrl: effectiveBaseUrl,
-    apiKeySource,
+    apiKeySource: effectiveApiKeySource,
     apiKeyEnvironmentName,
     apiKey
   };

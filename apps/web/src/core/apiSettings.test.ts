@@ -26,6 +26,24 @@ describe("apiSettings", () => {
     );
   });
 
+  it("keeps OpenRouter as the open-source default provider", () => {
+    assert.equal(DEFAULT_API_SETTINGS.providerId, "openrouter");
+    assert.equal(DEFAULT_API_SETTINGS.apiKeySource, "environment");
+  });
+
+  it("supports ChatHTML Cloud as a managed provider preset", () => {
+    const normalized = normalizeApiSettings({
+      providerId: "chathtml-cloud",
+      apiKeySource: "manual",
+      apiKey: "should-not-be-used"
+    });
+    const serialized = serializeApiSettings(normalized);
+
+    assert.equal(normalized.providerId, "chathtml-cloud");
+    assert.equal(normalized.apiKeySource, "managed");
+    assert.equal(serialized.apiKey, "");
+  });
+
   it("keeps the active model in selectable UI options", () => {
     const normalized = normalizeApiSettings({
       providerId: "openrouter",

@@ -53,6 +53,149 @@ button {
   box-shadow: none;
 }
 
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.auth-panel {
+  position: relative;
+  display: flex;
+  width: min(430px, calc(100vw - 32px));
+  flex-direction: column;
+  gap: 18px;
+  padding: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  color: #f4f4f5;
+  background: rgba(24, 24, 27, 0.94);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+}
+
+.auth-close-button {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  color: #d4d4d8;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.auth-close-button:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.auth-header,
+.auth-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.auth-header {
+  gap: 8px;
+}
+
+.auth-brand {
+  color: #a1a1aa;
+  font-size: 12px;
+  font-weight: 720;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.auth-header h1 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 28px;
+  line-height: 1.12;
+}
+
+.auth-header p,
+.auth-status,
+.auth-mode-switch button {
+  margin: 0;
+  color: #d4d4d8;
+  font-size: 14px;
+}
+
+.auth-form {
+  gap: 12px;
+}
+
+.auth-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: #e4e4e7;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.auth-form input {
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+  outline: none;
+}
+
+.auth-form input:focus {
+  border-color: rgba(255, 255, 255, 0.42);
+}
+
+.auth-primary-button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 8px;
+  color: #18181b;
+  background: #ffffff;
+  font-weight: 760;
+}
+
+.auth-primary-button:disabled,
+.auth-mode-switch button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.auth-error {
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.42);
+  font-size: 13px;
+}
+
+.auth-mode-switch {
+  display: flex;
+  justify-content: center;
+}
+
+.auth-mode-switch button {
+  border: 0;
+  color: #ffffff;
+  background: transparent;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 :root[data-theme="day"] {
   color-scheme: light;
   --page-bg: #ffffff;
@@ -358,6 +501,40 @@ button {
   justify-content: space-between;
   gap: 8px;
   padding-top: 4px;
+}
+
+.sidebar-account {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 8px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #eeeeee;
+}
+
+.sidebar-account-email,
+.sidebar-account-balance {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-account-email {
+  color: #3f3f46;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.15;
+}
+
+.sidebar-account-balance {
+  color: #18181b;
+  font-size: 12px;
+  font-weight: 760;
+  line-height: 1.1;
 }
 
 .theme-toggle {
@@ -1161,6 +1338,18 @@ button {
 
 .app-shell[data-theme="night"] .session-menu-item.is-danger:hover:not(:disabled) {
   background: rgba(180, 35, 24, 0.22);
+}
+
+.app-shell[data-theme="night"] .sidebar-account {
+  background: #2f2f2f;
+}
+
+.app-shell[data-theme="night"] .sidebar-account-email {
+  color: #c7c7cc;
+}
+
+.app-shell[data-theme="night"] .sidebar-account-balance {
+  color: #ffffff;
 }
 
 .app-shell[data-theme="night"] .theme-toggle {

@@ -891,6 +891,11 @@ function readRuntimeApiSettings(input: unknown): RuntimeApiSettings {
       ? (input as Record<string, unknown>)
       : {};
   const credentials = readRuntimeApiCredentials(input);
+  if (credentials.apiKeySource === "managed") {
+    throw new Error(
+      "Managed ChatHTML Cloud requests require a hosted ChatHTML Cloud backend. Use OpenRouter/OpenAI with your own API key in the open-source server."
+    );
+  }
   const modelValue = typeof object.model === "string" ? object.model.trim() : "";
   const model =
     modelValue ||

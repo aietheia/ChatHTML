@@ -108,6 +108,13 @@ export async function handleModelsRequest(
       ? (body.apiSettings as Record<string, unknown>)
       : {};
   const credentials = readRuntimeApiCredentials(object);
+  if (credentials.apiKeySource === "managed") {
+    res.status(501).json({
+      error:
+        "Managed ChatHTML Cloud models require a hosted ChatHTML Cloud backend."
+    });
+    return;
+  }
   const endpoint = normalizeModelsEndpoint(
     object.modelsEndpoint,
     credentials.baseUrl

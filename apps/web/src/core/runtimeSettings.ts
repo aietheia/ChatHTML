@@ -27,6 +27,13 @@ export type RuntimeSettingsSummary = {
     defaults: ApiSettings;
     environmentKeys: EnvironmentKeyStatus[];
   };
+  cloud?: {
+    enabled: boolean;
+    authRequired: boolean;
+    billingEnabled: boolean;
+    managedProviderEnabled: boolean;
+    brandName: string;
+  };
   search: {
     environmentKeys: EnvironmentKeyStatus[];
     defaultProvider: "auto" | "brave" | "tavily" | "serper" | "duckduckgo" | "none";

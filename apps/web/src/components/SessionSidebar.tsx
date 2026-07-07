@@ -2,10 +2,12 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
 import {
   Check,
+  CreditCard,
   Download,
   Eraser,
   Eye,
   KeyRound,
+  LogOut,
   Menu,
   MoreHorizontal,
   Moon,
@@ -59,6 +61,8 @@ import {
   type RuntimeSearchProviderStatus,
   type RuntimeSettingsSummary
 } from "../core/runtimeSettings";
+import type { AuthUser } from "../core/cloudAuth";
+import { topUpBalance } from "../core/cloudBilling";
 import { fetchModelCatalog } from "../features/settings/modelCatalog";
 import { ModelImportDialog } from "./ModelImportDialog";
 
@@ -69,7 +73,7 @@ export type SessionListItem = {
   title: string;
 };
 
-type SettingsSection = "api" | "preferences" | "display" | "search";
+type SettingsSection = "api" | "billing" | "preferences" | "display" | "search";
 
 const COMPACT_SIDEBAR_QUERY = "(max-width: 720px), (orientation: portrait)";
 
@@ -90,6 +94,8 @@ type SessionSidebarProps = {
   searchSettings: SearchSettings;
   displaySettings: DisplaySettings;
   runtimeSettings: RuntimeSettingsSummary | null;
+  cloudEnabled?: boolean;
+  authUser?: AuthUser | null;
   onNewSession(): void;
   onSelectSession(id: string): void;
   onDeleteSession(id: string): void;
@@ -97,6 +103,9 @@ type SessionSidebarProps = {
   onApiSettingsChange(settings: ApiSettings): void;
   onSearchSettingsChange(settings: SearchSettings): void;
   onDisplaySettingsChange(settings: DisplaySettings): void;
+  onAuthUserChange?(user: AuthUser): void;
+  onLoginRequest?(): void;
+  onLogout?(): void;
 };
 
 function getSearchEnvironmentKeyNames(provider: SearchProvider): string[] {
@@ -185,13 +194,18 @@ export function SessionSidebar({
   searchSettings,
   displaySettings,
   runtimeSettings,
+  cloudEnabled = false,
+  authUser,
   onNewSession,
   onSelectSession,
   onDeleteSession,
   onThemeModeChange,
   onApiSettingsChange,
   onSearchSettingsChange,
-  onDisplaySettingsChange
+  onDisplaySettingsChange,
+  onAuthUserChange,
+  onLoginRequest,
+  onLogout
 }: SessionSidebarProps) {
   const [isCompactSidebar, setIsCompactSidebar] = useState(
     getInitialSidebarCollapsed
@@ -216,6 +230,12 @@ export function SessionSidebar({
   const [preferenceImportError, setPreferenceImportError] = useState<string | null>(
     null
   );
+  const [topUpAmount, setTopUpAmount] = useState("10");
+  const [isTopUpLoading, setIsTopUpLoading] = useState(false);
+  const [topUpFeedback, setTopUpFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
   const preferenceFileInputRef = useRef<HTMLInputElement | null>(null);
   const activeApiKeyStatus = getEnvironmentKeyStatus(
     runtimeSettings?.api.environmentKeys,
@@ -225,10 +245,25 @@ export function SessionSidebar({
     runtimeSettings?.api.environmentKeys,
     getApiKeyEnvironmentName(draftApiSettings)
   );
+  const activeApiUsesRuntimeKey =
+    apiSettings.apiKeySource === "environment" ||
+    apiSettings.apiKeySource === "managed";
+  const draftApiUsesRuntimeKey =
+    draftApiSettings.apiKeySource === "environment" ||
+    draftApiSettings.apiKeySource === "managed";
+  const isManagedApiProvider = draftApiSettings.apiKeySource === "managed";
+  const draftApiKeySourceOptions = isManagedApiProvider
+    ? [{ value: "managed" as ApiKeySource, label: "Managed by ChatHTML Cloud" }]
+    : API_KEY_SOURCE_OPTIONS;
+  const providerPresets = API_PROVIDER_PRESETS.filter(
+    (preset) =>
+      preset.apiKeySource !== "managed" ||
+      cloudEnabled ||
+      preset.id === draftApiSettings.providerId
+  );
   const apiSettingsComplete =
     hasCompleteApiSettings(apiSettings) &&
-    (apiSettings.apiKeySource !== "environment" ||
-      activeApiKeyStatus?.configured !== false);
+    (!activeApiUsesRuntimeKey || activeApiKeyStatus?.configured !== false);
   const searchAllowsManualKey = searchProviderNeedsApiKey(
     draftSearchSettings.provider
   );
@@ -273,8 +308,15 @@ export function SessionSidebar({
       setDraftSearchSettings(searchSettings);
       setDraftDisplaySettings(displaySettings);
       setPreferenceImportError(null);
+      setTopUpFeedback(null);
     }
   }, [apiSettings, displaySettings, isSettingsOpen, searchSettings]);
+
+  useEffect(() => {
+    if (!cloudEnabled && settingsSection === "billing") {
+      setSettingsSection("api");
+    }
+  }, [cloudEnabled, settingsSection]);
 
   useEffect(() => {
     if (isSending) {
@@ -364,7 +406,9 @@ export function SessionSidebar({
         model: preset.model,
         modelOptions: [preset.model],
         modelsEndpoint: getDefaultModelsEndpoint(preset.baseUrl),
-        reasoningEffort: preset.reasoningEffort
+        reasoningEffort: preset.reasoningEffort,
+        apiKeySource: preset.apiKeySource ?? current.apiKeySource,
+        apiKey: preset.apiKeySource === "managed" ? "" : current.apiKey
       })
     );
   };
@@ -487,6 +531,36 @@ export function SessionSidebar({
       })
     );
     setPreferenceImportError(null);
+  };
+
+  const handlePlaceholderTopUp = async () => {
+    if (!authUser || isTopUpLoading) {
+      return;
+    }
+
+    setIsTopUpLoading(true);
+    setTopUpFeedback(null);
+    try {
+      const result = await topUpBalance(topUpAmount.trim());
+      onAuthUserChange?.({
+        ...authUser,
+        balanceMicros: result.balanceMicros,
+        balanceUsd: result.balanceUsd
+      });
+      setTopUpAmount(result.amountUsd);
+      setTopUpFeedback({
+        type: "success",
+        message: `Added $${result.amountUsd}. Balance is $${result.balanceUsd}.`
+      });
+    } catch (error) {
+      setTopUpFeedback({
+        type: "error",
+        message:
+          error instanceof Error ? error.message : "Could not add credit."
+      });
+    } finally {
+      setIsTopUpLoading(false);
+    }
   };
 
   const handleSaveSettings = () => {
@@ -639,6 +713,27 @@ export function SessionSidebar({
           </nav>
 
           <div className="sidebar-footer">
+            {cloudEnabled && authUser ? (
+              <div className="sidebar-account" title={authUser.email}>
+                <span className="sidebar-account-email">{authUser.email}</span>
+                {typeof authUser.balanceUsd === "string" ? (
+                  <span className="sidebar-account-balance">
+                    ${authUser.balanceUsd}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+            {cloudEnabled && !authUser && onLoginRequest ? (
+              <button
+                className="sidebar-icon-button"
+                type="button"
+                aria-label="Sign in to ChatHTML Cloud"
+                title="Sign in to ChatHTML Cloud"
+                onClick={onLoginRequest}
+              >
+                <UserRound size={17} strokeWidth={2.1} aria-hidden="true" />
+              </button>
+            ) : null}
             <div
               className="theme-toggle"
               data-mode={themeMode}
@@ -670,12 +765,23 @@ export function SessionSidebar({
                 apiSettingsComplete ? "is-configured" : "needs-setup"
               }`}
               type="button"
-              aria-label="API settings"
+              aria-label="Provider settings"
               aria-pressed={isSettingsOpen}
               onClick={() => setIsSettingsOpen(true)}
             >
               <Settings2 size={17} strokeWidth={2.1} aria-hidden="true" />
             </button>
+            {cloudEnabled && authUser && onLogout ? (
+              <button
+                className="sidebar-icon-button"
+                type="button"
+                aria-label="Sign out"
+                title="Sign out"
+                onClick={onLogout}
+              >
+                <LogOut size={17} strokeWidth={2.1} aria-hidden="true" />
+              </button>
+            ) : null}
           </div>
         </>
       )}
@@ -716,8 +822,20 @@ export function SessionSidebar({
                 onClick={() => setSettingsSection("api")}
               >
                 <KeyRound size={18} strokeWidth={2.1} aria-hidden="true" />
-                <span>API</span>
+                <span>Providers</span>
               </button>
+              {cloudEnabled ? (
+                <button
+                  className={`settings-nav-item ${
+                    settingsSection === "billing" ? "is-active" : ""
+                  }`}
+                  type="button"
+                  onClick={() => setSettingsSection("billing")}
+                >
+                  <CreditCard size={18} strokeWidth={2.1} aria-hidden="true" />
+                  <span>Billing</span>
+                </button>
+              ) : null}
               <button
                 className={`settings-nav-item ${
                   settingsSection === "preferences" ? "is-active" : ""
@@ -754,7 +872,9 @@ export function SessionSidebar({
               <header className="settings-content-header">
                 <h2 id="settings-panel-title">
                   {settingsSection === "api"
-                    ? "API"
+                    ? "Providers"
+                    : settingsSection === "billing"
+                      ? "Billing"
                     : settingsSection === "preferences"
                       ? "User Preferences"
                       : settingsSection === "display"
@@ -780,7 +900,7 @@ export function SessionSidebar({
                           handleProviderChange(event.target.value as ApiProviderId)
                         }
                       >
-                        {API_PROVIDER_PRESETS.map((preset) => (
+                        {providerPresets.map((preset) => (
                           <option key={preset.id} value={preset.id}>
                             {preset.label}
                           </option>
@@ -794,6 +914,7 @@ export function SessionSidebar({
                         value={draftApiSettings.baseUrl}
                         autoComplete="off"
                         spellCheck={false}
+                        disabled={isManagedApiProvider}
                         placeholder="https://api.example.com/v1"
                         onChange={(event) => updateApiBaseUrl(event.target.value)}
                       />
@@ -803,13 +924,14 @@ export function SessionSidebar({
                       <span>API Key Source</span>
                       <select
                         value={draftApiSettings.apiKeySource}
+                        disabled={isManagedApiProvider}
                         onChange={(event) =>
                           updateApiDraft({
                             apiKeySource: event.target.value as ApiKeySource
                           })
                         }
                       >
-                        {API_KEY_SOURCE_OPTIONS.map((option) => (
+                        {draftApiKeySourceOptions.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
                           </option>
@@ -823,11 +945,13 @@ export function SessionSidebar({
                         <input
                           value={draftApiSettings.apiKey}
                           autoComplete="off"
-                          disabled={draftApiSettings.apiKeySource === "environment"}
+                          disabled={draftApiSettings.apiKeySource !== "manual"}
                           spellCheck={false}
                           type="password"
                           placeholder={
-                            draftApiSettings.apiKeySource === "environment"
+                            isManagedApiProvider
+                              ? "Managed by ChatHTML Cloud"
+                              : draftApiSettings.apiKeySource === "environment"
                               ? getApiKeyEnvironmentName(draftApiSettings)
                               : "sk-..."
                           }
@@ -835,7 +959,7 @@ export function SessionSidebar({
                             updateApiDraft({ apiKey: event.target.value })
                           }
                         />
-                        {draftApiSettings.apiKeySource === "environment" ? (
+                        {draftApiUsesRuntimeKey ? (
                           <span
                             className={`settings-hint settings-env-status ${getEnvironmentStatusClass(
                               draftApiKeyStatus
@@ -879,6 +1003,7 @@ export function SessionSidebar({
                           value={draftApiSettings.modelsEndpoint}
                           autoComplete="off"
                           spellCheck={false}
+                          disabled={isManagedApiProvider}
                           placeholder={
                             getDefaultModelsEndpoint(draftApiSettings.baseUrl) ||
                             "https://api.example.com/v1/models"
@@ -950,6 +1075,80 @@ export function SessionSidebar({
                           </option>
                         ))}
                       </select>
+                    </label>
+                  </>
+                ) : settingsSection === "billing" ? (
+                  <>
+                    <div className="settings-row">
+                      <span>Balance</span>
+                      <div className="settings-control-stack">
+                        <span className="settings-capability-chip is-configured">
+                          {authUser && typeof authUser.balanceUsd === "string"
+                            ? `$${authUser.balanceUsd}`
+                            : "Sign in required"}
+                        </span>
+                        <span className="settings-hint">
+                          Managed runs are charged from this prepaid balance by
+                          the hosted ChatHTML Cloud backend.
+                        </span>
+                        {!authUser && onLoginRequest ? (
+                          <button
+                            className="settings-small-button"
+                            type="button"
+                            onClick={onLoginRequest}
+                          >
+                            <UserRound
+                              size={14}
+                              strokeWidth={2.1}
+                              aria-hidden="true"
+                            />
+                            <span>Sign In</span>
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <label className="settings-row">
+                      <span>Top Up</span>
+                      <div className="settings-control-stack">
+                        <div className="settings-inline-control">
+                          <input
+                            value={topUpAmount}
+                            autoComplete="off"
+                            disabled={!authUser || isTopUpLoading}
+                            inputMode="decimal"
+                            placeholder="10"
+                            onChange={(event) => {
+                              setTopUpAmount(event.target.value);
+                              setTopUpFeedback(null);
+                            }}
+                          />
+                          <button
+                            className="settings-small-button"
+                            type="button"
+                            disabled={!authUser || isTopUpLoading}
+                            onClick={() => void handlePlaceholderTopUp()}
+                          >
+                            <Plus size={14} strokeWidth={2.1} aria-hidden="true" />
+                            <span>{isTopUpLoading ? "Adding" : "Top Up"}</span>
+                          </button>
+                        </div>
+                        <span
+                          className={`settings-hint ${
+                            topUpFeedback
+                              ? `settings-env-status ${
+                                  topUpFeedback.type === "success"
+                                    ? "is-configured"
+                                    : "is-missing"
+                                }`
+                              : ""
+                          }`}
+                        >
+                          {topUpFeedback
+                            ? topUpFeedback.message
+                            : "Uses the public /api/billing/top-up contract."}
+                        </span>
+                      </div>
                     </label>
                   </>
                 ) : settingsSection === "preferences" ? (

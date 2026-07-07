@@ -1,4 +1,9 @@
-export type ApiProviderId = "openrouter" | "openai" | "local" | "custom";
+export type ApiProviderId =
+  | "openrouter"
+  | "chathtml-cloud"
+  | "openai"
+  | "local"
+  | "custom";
 
 export type ReasoningEffort =
   | "none"
@@ -8,7 +13,7 @@ export type ReasoningEffort =
   | "high"
   | "xhigh";
 
-export type ApiKeySource = "environment" | "manual";
+export type ApiKeySource = "environment" | "manual" | "managed";
 
 export type ApiSettings = {
   providerId: ApiProviderId;
@@ -42,6 +47,7 @@ export type ApiProviderPreset = {
   baseUrl: string;
   model: string;
   reasoningEffort: ReasoningEffort;
+  apiKeySource?: ApiKeySource;
 };
 
 export const API_SETTINGS_STORAGE_KEY = "streamui.apiSettings.v1";
@@ -66,6 +72,14 @@ export const API_PROVIDER_PRESETS: ApiProviderPreset[] = [
     baseUrl: "https://openrouter.ai/api/v1",
     model: "google/gemini-3.1-pro-preview",
     reasoningEffort: "low"
+  },
+  {
+    id: "chathtml-cloud",
+    label: "ChatHTML Cloud",
+    baseUrl: "https://openrouter.ai/api/v1",
+    model: "google/gemini-3.1-pro-preview",
+    reasoningEffort: "low",
+    apiKeySource: "managed"
   },
   {
     id: "openai",
@@ -135,7 +149,25 @@ function isReasoningEffort(value: unknown): value is ReasoningEffort {
 }
 
 function isApiKeySource(value: unknown): value is ApiKeySource {
-  return API_KEY_SOURCE_OPTIONS.some((option) => option.value === value);
+  return (
+    value === "managed" ||
+    API_KEY_SOURCE_OPTIONS.some((option) => option.value === value)
+  );
+}
+
+function normalizeApiKeySourceForPreset(
+  value: unknown,
+  preset: ApiProviderPreset
+): ApiKeySource {
+  if (preset.apiKeySource === "managed") {
+    return "managed";
+  }
+
+  if (isApiKeySource(value) && value !== "managed") {
+    return value;
+  }
+
+  return preset.apiKeySource ?? DEFAULT_API_SETTINGS.apiKeySource;
 }
 
 export function getDefaultModelsEndpoint(baseUrl: string): string {
@@ -406,9 +438,10 @@ export function normalizeApiSettings(input: unknown): ApiSettings {
     providerId,
     providerName,
     baseUrl,
-    apiKeySource: isApiKeySource(object.apiKeySource)
-      ? object.apiKeySource
-      : DEFAULT_API_SETTINGS.apiKeySource,
+    apiKeySource: normalizeApiKeySourceForPreset(
+      object.apiKeySource,
+      preset
+    ),
     apiKey: typeof object.apiKey === "string" ? object.apiKey.trim() : "",
     model,
     modelOptions: normalizeModelOptions(object.modelOptions),
@@ -471,7 +504,9 @@ export function serializeApiSettings(settings: ApiSettings): ApiSettings {
 export function hasCompleteApiSettings(settings: ApiSettings): boolean {
   const normalized = normalizeApiSettings(settings);
   return Boolean(
-    (normalized.apiKeySource === "environment" || normalized.apiKey.trim()) &&
+    (normalized.apiKeySource === "managed" ||
+      normalized.apiKeySource === "environment" ||
+      normalized.apiKey.trim()) &&
       normalized.baseUrl.trim() &&
       normalized.model.trim()
   );
@@ -480,6 +515,9 @@ export function hasCompleteApiSettings(settings: ApiSettings): boolean {
 export function getApiKeyEnvironmentName(settings: ApiSettings): string {
   const normalized = normalizeApiSettings(settings);
 
+  if (normalized.providerId === "chathtml-cloud") {
+    return "CHATHTML_CLOUD_API_KEY";
+  }
   if (normalized.providerId === "openrouter") {
     return "OPENROUTER_API_KEY";
   }
