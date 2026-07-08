@@ -118,6 +118,7 @@ export const STREAM_INTERRUPTED_ERROR =
   "The stream was interrupted before it completed.";
 const LOCAL_ARTIFACT_EDIT_INTERRUPTED_ERROR =
   "The local edit was interrupted.";
+const LOCAL_ARTIFACT_EDIT_INTERRUPTION_GRACE_MS = 15 * 60 * 1000;
 
 export function createId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -722,27 +723,42 @@ function normalizeArtifactEditVariant(
   if (!id) {
     return null;
   }
-  const status =
+  const createdAt =
+    typeof variant.createdAt === "number" && Number.isFinite(variant.createdAt)
+      ? variant.createdAt
+      : now;
+  const error = normalizeBoundedString(variant.error, 800);
+  const rawStatus =
     variant.status === "pending" ||
     variant.status === "complete" ||
     variant.status === "error"
       ? variant.status
       : "complete";
-  const shouldInterrupt = interruptPending && status === "pending";
+  const isRecentInterruptedError =
+    rawStatus === "error" &&
+    error === LOCAL_ARTIFACT_EDIT_INTERRUPTED_ERROR &&
+    now - createdAt < LOCAL_ARTIFACT_EDIT_INTERRUPTION_GRACE_MS;
+  const status = isRecentInterruptedError ? "pending" : rawStatus;
+  const shouldInterrupt =
+    interruptPending &&
+    status === "pending" &&
+    now - createdAt >= LOCAL_ARTIFACT_EDIT_INTERRUPTION_GRACE_MS;
   const restoredStatus = shouldInterrupt ? "error" : status;
+  const normalizedError =
+    error === LOCAL_ARTIFACT_EDIT_INTERRUPTED_ERROR &&
+    (isRecentInterruptedError || restoredStatus !== "error")
+      ? undefined
+      : error;
 
   return {
     id,
-    createdAt:
-      typeof variant.createdAt === "number" && Number.isFinite(variant.createdAt)
-        ? variant.createdAt
-        : now,
+    createdAt,
     status: restoredStatus,
     rawStream:
       typeof variant.rawStream === "string" ? variant.rawStream : undefined,
     summary: normalizeBoundedString(variant.summary, 500),
     error:
-      normalizeBoundedString(variant.error, 800) ??
+      normalizedError ??
       (shouldInterrupt ? LOCAL_ARTIFACT_EDIT_INTERRUPTED_ERROR : undefined),
     editCount:
       typeof variant.editCount === "number" && Number.isFinite(variant.editCount)
@@ -766,13 +782,12 @@ function normalizeArtifactEdit(
   if (!id || !prompt) {
     return null;
   }
+  const createdAt =
+    typeof edit.createdAt === "number" && Number.isFinite(edit.createdAt)
+      ? edit.createdAt
+      : now;
+  const error = normalizeBoundedString(edit.error, 800);
   const inputVariants = Array.isArray(edit.variants) ? edit.variants : [];
-  const hadPendingVariant = inputVariants.some(
-    (variant) =>
-      variant &&
-      typeof variant === "object" &&
-      (variant as Partial<ArtifactEditVariant>).status === "pending"
-  );
   const variants = inputVariants.length
     ? inputVariants
         .map((variant) =>
@@ -780,27 +795,38 @@ function normalizeArtifactEdit(
         )
         .filter((variant): variant is ArtifactEditVariant => variant !== null)
     : [];
-  const status =
+  const rawStatus =
     edit.status === "pending" || edit.status === "complete" || edit.status === "error"
       ? edit.status
-      : hadPendingVariant
-        ? "pending"
-        : variants.some((variant) => variant.status === "pending")
+      : variants.some((variant) => variant.status === "pending")
           ? "pending"
           : variants.some((variant) => variant.status === "error")
           ? "error"
           : "complete";
-  const shouldInterrupt = interruptPending && status === "pending";
+  const hasPendingVariant = variants.some((variant) => variant.status === "pending");
+  const isRecentInterruptedError =
+    rawStatus === "error" &&
+    ((error === LOCAL_ARTIFACT_EDIT_INTERRUPTED_ERROR &&
+      now - createdAt < LOCAL_ARTIFACT_EDIT_INTERRUPTION_GRACE_MS) ||
+      ((!error || error === LOCAL_ARTIFACT_EDIT_INTERRUPTED_ERROR) &&
+        hasPendingVariant));
+  const status = isRecentInterruptedError ? "pending" : rawStatus;
+  const shouldInterrupt =
+    interruptPending &&
+    status === "pending" &&
+    now - createdAt >= LOCAL_ARTIFACT_EDIT_INTERRUPTION_GRACE_MS;
   const restoredStatus = shouldInterrupt ? "error" : status;
   const activeVariantId = normalizeBoundedString(edit.activeVariantId, 160);
+  const normalizedError =
+    error === LOCAL_ARTIFACT_EDIT_INTERRUPTED_ERROR &&
+    (isRecentInterruptedError || restoredStatus !== "error")
+      ? undefined
+      : error;
 
   return {
     id,
     parentId: normalizeBoundedString(edit.parentId, 160),
-    createdAt:
-      typeof edit.createdAt === "number" && Number.isFinite(edit.createdAt)
-        ? edit.createdAt
-        : now,
+    createdAt,
     prompt,
     references: normalizeArtifactEditReferences(edit.references),
     activeVariantId:
@@ -810,7 +836,7 @@ function normalizeArtifactEdit(
     variants,
     status: restoredStatus,
     error:
-      normalizeBoundedString(edit.error, 800) ??
+      normalizedError ??
       (shouldInterrupt ? LOCAL_ARTIFACT_EDIT_INTERRUPTED_ERROR : undefined)
   };
 }

@@ -825,6 +825,110 @@ describe("sessionModel", () => {
     assert.equal(message?.artifactEdits?.[0]?.variants[0]?.status, "pending");
   });
 
+  it("does not interrupt recently restored pending artifact edits", () => {
+    const now = Date.now();
+    const message = normalizeStoredMessage(
+      {
+        id: "a1",
+        role: "assistant",
+        content: "Artifact",
+        artifactEdits: [
+          {
+            id: "edit-1",
+            createdAt: now,
+            prompt: "Still running",
+            references: [],
+            activeVariantId: "variant-1",
+            variants: [
+              {
+                id: "variant-1",
+                createdAt: now,
+                status: "pending"
+              }
+            ],
+            status: "pending"
+          }
+        ]
+      },
+      { interruptPendingArtifactEdits: true }
+    );
+
+    assert.equal(message?.artifactEdits?.[0]?.status, "pending");
+    assert.equal(message?.artifactEdits?.[0]?.error, undefined);
+    assert.equal(message?.artifactEdits?.[0]?.variants[0]?.status, "pending");
+  });
+
+  it("recovers recently misclassified interrupted artifact edits", () => {
+    const now = Date.now();
+    const message = normalizeStoredMessage(
+      {
+        id: "a1",
+        role: "assistant",
+        content: "Artifact",
+        artifactEdits: [
+          {
+            id: "edit-1",
+            createdAt: now,
+            prompt: "Still running",
+            references: [],
+            activeVariantId: "variant-1",
+            variants: [
+              {
+                id: "variant-1",
+                createdAt: now,
+                status: "error",
+                error: "The local edit was interrupted."
+              }
+            ],
+            status: "error",
+            error: "The local edit was interrupted."
+          }
+        ]
+      },
+      { interruptPendingArtifactEdits: true }
+    );
+
+    assert.equal(message?.artifactEdits?.[0]?.status, "pending");
+    assert.equal(message?.artifactEdits?.[0]?.error, undefined);
+    assert.equal(message?.artifactEdits?.[0]?.variants[0]?.status, "pending");
+    assert.equal(message?.artifactEdits?.[0]?.variants[0]?.error, undefined);
+  });
+
+  it("keeps stale interrupted artifact edit errors", () => {
+    const stale = Date.now() - 60 * 60 * 1000;
+    const message = normalizeStoredMessage(
+      {
+        id: "a1",
+        role: "assistant",
+        content: "Artifact",
+        artifactEdits: [
+          {
+            id: "edit-1",
+            createdAt: stale,
+            prompt: "No longer running",
+            references: [],
+            activeVariantId: "variant-1",
+            variants: [
+              {
+                id: "variant-1",
+                createdAt: stale,
+                status: "error",
+                error: "The local edit was interrupted."
+              }
+            ],
+            status: "error",
+            error: "The local edit was interrupted."
+          }
+        ]
+      },
+      { interruptPendingArtifactEdits: true }
+    );
+
+    assert.equal(message?.artifactEdits?.[0]?.status, "error");
+    assert.match(message?.artifactEdits?.[0]?.error ?? "", /interrupted/i);
+    assert.equal(message?.artifactEdits?.[0]?.variants[0]?.status, "error");
+  });
+
   it("marks restored pending artifact edits as interrupted when requested", () => {
     const message = normalizeStoredMessage(
       {
