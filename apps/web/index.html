@@ -3,9 +3,48 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ChatHTML Runtime</title>
+    <meta
+      name="description"
+      content="ChatHTML is an open AI chat runtime that turns natural language prompts into streamed, sandboxed HTML artifacts: visual answers, interactive documents, research cards, diagrams, and small web experiences."
+    />
+    <meta name="application-name" content="ChatHTML" />
+    <meta name="robots" content="index, follow" />
+    <meta property="og:title" content="ChatHTML" />
+    <meta
+      property="og:description"
+      content="An AI chat runtime for streamed, sandboxed HTML artifacts and visual interactive answers."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://chat.aietheia.com/" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="ChatHTML" />
+    <meta
+      name="twitter:description"
+      content="Natural language prompts rendered as live HTML artifacts inside a chat."
+    />
+    <link rel="canonical" href="https://chat.aietheia.com/" />
+    <link rel="alternate" type="text/plain" href="/llms.txt" title="ChatHTML description for AI crawlers" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "ChatHTML",
+        "applicationCategory": "AIApplication",
+        "operatingSystem": "Web",
+        "url": "https://chat.aietheia.com/",
+        "description": "ChatHTML is an open AI chat runtime that streams model responses as sandboxed HTML artifacts. It is designed for visual answers, interactive documents, research cards with source links, diagrams, educational explanations, and small web experiences generated from natural language prompts.",
+        "codeRepository": "https://github.com/aietheia/ChatHTML"
+      }
+    </script>
+    <title>ChatHTML - AI responses as live HTML artifacts</title>
   </head>
   <body>
+    <noscript>
+      ChatHTML is an open AI chat runtime that turns prompts into streamed,
+      sandboxed HTML artifacts such as visual answers, interactive documents,
+      research cards, diagrams, and small web experiences. See /llms.txt for a
+      concise machine-readable description.
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

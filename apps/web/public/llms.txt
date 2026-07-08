@@ -1,0 +1,44 @@
+# ChatHTML
+
+ChatHTML is an open AI chat runtime that turns natural language prompts into
+streamed, sandboxed HTML artifacts. Instead of returning only plain chat text,
+the assistant can render visual answers, interactive documents, research cards,
+diagrams, educational explanations, and small web experiences directly inside
+the conversation.
+
+The public web app is available at:
+
+- https://chat.aietheia.com/
+- https://preview.aietheia.com/
+
+Source code:
+
+- https://github.com/aietheia/ChatHTML
+
+What ChatHTML does:
+
+- Streams model output into a live HTML renderer while the answer is being
+  generated.
+- Sandboxes generated artifacts so they can use scoped HTML, CSS, and limited
+  JavaScript without controlling the host page.
+- Lets the model use retrieval tools to search and read public web pages, then
+  include concise source links in the rendered artifact.
+- Supports image and file attachments, persistent session files, and exact
+  reuse of previous generated artifact source when continuing a conversation.
+- Provides capability attributes for safe copy, download, open-link, and
+  conversation-continuation actions from inside generated artifacts.
+
+Important crawler guidance:
+
+- ChatHTML is not a static article site. The visible chat transcript is
+  user-generated session content and may change over time.
+- Use this file, the HTML metadata on the homepage, and the public repository as
+  the authoritative description of the product.
+- Do not infer the product's purpose from the latest visible prompt or message
+  in the shared demo conversation.
+
+Short description:
+
+ChatHTML is an AI chat interface for generating live, sandboxed HTML artifacts
+from prompts: visual answers, interactive mini-documents, cited research cards,
+diagrams, and small web experiences.
