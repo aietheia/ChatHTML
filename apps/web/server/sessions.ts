@@ -807,9 +807,97 @@ function shouldPreserveCurrentRunMessage(
   return false;
 }
 
+function artifactEditObjects(
+  message: StoredMessage | undefined
+): Record<string, unknown>[] {
+  return (message?.artifactEdits ?? []).filter(
+    (item): item is Record<string, unknown> =>
+      Boolean(item) && typeof item === "object" && !Array.isArray(item)
+  );
+}
+
+function artifactEditId(edit: Record<string, unknown>): string {
+  return stringValue(edit.id).trim();
+}
+
+function artifactEditVariants(
+  edit: Record<string, unknown> | undefined
+): Record<string, unknown>[] {
+  return (Array.isArray(edit?.variants) ? edit.variants : []).filter(
+    (item): item is Record<string, unknown> =>
+      Boolean(item) && typeof item === "object" && !Array.isArray(item)
+  );
+}
+
+function hasCompletedArtifactEditVariant(
+  edit: Record<string, unknown> | undefined
+): boolean {
+  return artifactEditVariants(edit).some(
+    (variant) =>
+      variant.status === "complete" &&
+      typeof variant.rawStream === "string" &&
+      Boolean(variant.rawStream.trim())
+  );
+}
+
+function hasArtifactEditState(message: StoredMessage | undefined): boolean {
+  return Boolean(
+    message?.artifactEditBaseRawStream ||
+      message?.activeArtifactEditId ||
+      artifactEditObjects(message).length
+  );
+}
+
+function shouldPreserveCurrentArtifactEditMessage(
+  current: StoredMessage | undefined,
+  incoming: StoredMessage
+): boolean {
+  if (!current || !hasArtifactEditState(current)) {
+    return false;
+  }
+
+  if (!hasArtifactEditState(incoming)) {
+    return true;
+  }
+
+  const currentEdits = artifactEditObjects(current);
+  const incomingEdits = artifactEditObjects(incoming);
+  const incomingById = new Map(
+    incomingEdits.map((edit) => [artifactEditId(edit), edit])
+  );
+
+  if (currentEdits.length > incomingEdits.length) {
+    return true;
+  }
+
+  for (const edit of currentEdits) {
+    const id = artifactEditId(edit);
+    const incomingEdit = incomingById.get(id);
+    if (!id || !incomingEdit) {
+      return true;
+    }
+
+    if (
+      hasCompletedArtifactEditVariant(edit) &&
+      !hasCompletedArtifactEditVariant(incomingEdit)
+    ) {
+      return true;
+    }
+  }
+
+  const currentActiveId = stringValue(current.activeArtifactEditId).trim();
+  const incomingActiveId = stringValue(incoming.activeArtifactEditId).trim();
+  if (currentActiveId && currentActiveId !== incomingActiveId) {
+    return true;
+  }
+
+  return false;
+}
+
 function mergeMessagesForClientSave(
   current: StoredMessage[],
-  incoming: StoredMessage[]
+  incoming: StoredMessage[],
+  options: { preserveStaleArtifactEdits?: boolean } = {}
 ): StoredMessage[] {
   const currentById = new Map(current.map((message) => [message.id, message]));
   const incomingIds = new Set(incoming.map((message) => message.id));
@@ -827,6 +915,13 @@ function mergeMessagesForClientSave(
 
   return incoming.map((message) => {
     const currentMessage = currentById.get(message.id);
+    if (
+      options.preserveStaleArtifactEdits &&
+      shouldPreserveCurrentArtifactEditMessage(currentMessage, message)
+    ) {
+      return currentMessage ?? message;
+    }
+
     return shouldPreserveCurrentRunMessage(currentMessage, message)
       ? currentMessage ?? message
       : message;
@@ -865,13 +960,16 @@ export function mergeClientSaveState(
       return session;
     }
     const hasActiveRun = hasActiveRunMessage(currentSession);
+    const incomingIsOlder = session.updatedAt <= currentSession.updatedAt;
 
     return {
       ...session,
       updatedAt: hasActiveRun
         ? Math.max(session.updatedAt, currentSession.updatedAt)
         : session.updatedAt,
-      messages: mergeMessagesForClientSave(currentSession.messages, session.messages),
+      messages: mergeMessagesForClientSave(currentSession.messages, session.messages, {
+        preserveStaleArtifactEdits: incomingIsOlder
+      }),
       files: hasActiveRun
         ? mergeSessionFiles(currentSession.files, session.files)
         : session.files

@@ -1127,6 +1127,10 @@ function normalizeArtifactEditResponse(input: unknown): ArtifactEditResponse {
   };
 }
 
+function didArtifactEditChangeSource(before: string, after: string): boolean {
+  return before.trim() !== after.trim();
+}
+
 function buildArtifactActionMessage(action: StreamUiAction): string {
   return action.type === "prompt" ? action.prompt.trim().slice(0, 2000) : "";
 }
@@ -4210,6 +4214,11 @@ export default function App() {
         }
 
         const result = normalizeArtifactEditResponse(await response.json());
+        if (!didArtifactEditChangeSource(source, result.rawStream)) {
+          throw new Error(
+            "The artifact edit did not change the source. Try a more specific prompt or select a larger reference."
+          );
+        }
         const patch = buildCompletedAssistantPatchFromRawStream(
           result.rawStream,
           themeMode
@@ -4347,6 +4356,7 @@ export default function App() {
           Boolean(localArtifactEditAbortRef.current);
         setIsSending(nextIsSending);
         isSendingRef.current = nextIsSending;
+        saveCurrentSessionStateNow();
         if (requestApiSettings.apiKeySource === "managed") {
           void refreshAuthSummary().catch((error) => {
             console.warn("Could not refresh ChatHTML Cloud account.", error);
@@ -4362,6 +4372,7 @@ export default function App() {
       cloudEnabled,
       refreshAuthSummary,
       runtimeSettings,
+      saveCurrentSessionStateNow,
       themeMode,
       updateAssistantMessage
     ]
@@ -4675,6 +4686,11 @@ export default function App() {
         }
 
         const result = normalizeArtifactEditResponse(await response.json());
+        if (!didArtifactEditChangeSource(source, result.rawStream)) {
+          throw new Error(
+            "The artifact edit did not change the source. Try a more specific prompt or select a larger reference."
+          );
+        }
         const patch = buildCompletedAssistantPatchFromRawStream(
           result.rawStream,
           themeMode
@@ -4746,6 +4762,7 @@ export default function App() {
           Boolean(localArtifactEditAbortRef.current);
         setIsSending(nextIsSending);
         isSendingRef.current = nextIsSending;
+        saveCurrentSessionStateNow();
         if (requestApiSettings.apiKeySource === "managed") {
           void refreshAuthSummary().catch((error) => {
             console.warn("Could not refresh ChatHTML Cloud account.", error);
@@ -4759,6 +4776,7 @@ export default function App() {
       cloudEnabled,
       refreshAuthSummary,
       runtimeSettings,
+      saveCurrentSessionStateNow,
       themeMode,
       updateAssistantMessage
     ]

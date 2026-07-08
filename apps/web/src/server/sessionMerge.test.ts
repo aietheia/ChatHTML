@@ -5,7 +5,11 @@ import {
   mergeClientSaveState
 } from "../../server/sessions.js";
 
-function userMessage(id: string, content: string) {
+type StoredSessionStateForTest = Parameters<typeof mergeClientSaveState>[0];
+type StoredSessionForTest = StoredSessionStateForTest["sessions"][number];
+type StoredMessageForTest = StoredSessionForTest["messages"][number];
+
+function userMessage(id: string, content: string): StoredMessageForTest {
   return {
     id,
     role: "user" as const,
@@ -16,8 +20,8 @@ function userMessage(id: string, content: string) {
 function session(
   id: string,
   updatedAt: number,
-  messages: ReturnType<typeof userMessage>[] = []
-) {
+  messages: StoredMessageForTest[] = []
+): StoredSessionForTest {
   return {
     id,
     title: id,
@@ -26,6 +30,36 @@ function session(
     messages,
     files: []
   };
+}
+
+function assistantWithCompletedArtifactEdit(): StoredMessageForTest {
+  return {
+    id: "a1",
+    role: "assistant" as const,
+    content: "",
+    rawStream: "<chat></chat><streamui><p>Edited</p></streamui>",
+    artifactEditBaseRawStream:
+      "<chat></chat><streamui><p>Original</p></streamui>",
+    activeArtifactEditId: "edit-1",
+    artifactEdits: [
+      {
+        id: "edit-1",
+        createdAt: 20,
+        prompt: "Change copy",
+        references: [],
+        activeVariantId: "variant-1",
+        variants: [
+          {
+            id: "variant-1",
+            createdAt: 20,
+            status: "complete",
+            rawStream: "<chat></chat><streamui><p>Edited</p></streamui>"
+          }
+        ],
+        status: "complete"
+      }
+    ]
+  } as StoredMessageForTest;
 }
 
 describe("server session merge", () => {
@@ -189,5 +223,123 @@ describe("server session merge", () => {
       merged.sessions[0].messages[0].error,
       "The stream was interrupted before it completed."
     );
+  });
+
+  it("keeps completed artifact edits when an older client save arrives later", () => {
+    const current = {
+      sessions: [
+        session("active", 50, [
+          userMessage("u1", "make a card"),
+          assistantWithCompletedArtifactEdit()
+        ])
+      ],
+      activeSessionId: "active"
+    };
+    const incoming = {
+      sessions: [
+        session("active", 40, [
+          userMessage("u1", "make a card"),
+          {
+            id: "a1",
+            role: "assistant" as const,
+            content: "",
+            rawStream: "<chat></chat><streamui><p>Original</p></streamui>"
+          }
+        ])
+      ],
+      activeSessionId: "active"
+    };
+
+    const merged = mergeClientSaveState(current, incoming);
+    const assistant = merged.sessions[0].messages[1];
+    const edit = assistant.artifactEdits?.[0] as
+      | { status?: string }
+      | undefined;
+
+    assert.equal(assistant.rawStream, "<chat></chat><streamui><p>Edited</p></streamui>");
+    assert.equal(assistant.activeArtifactEditId, "edit-1");
+    assert.equal(edit?.status, "complete");
+  });
+
+  it("does not let older pending artifact edits replace completed edits", () => {
+    const pendingAssistant = {
+      ...assistantWithCompletedArtifactEdit(),
+      rawStream: "<chat></chat><streamui><p>Original</p></streamui>",
+      artifactEdits: [
+        {
+          id: "edit-1",
+          createdAt: 20,
+          prompt: "Change copy",
+          references: [],
+          activeVariantId: "variant-1",
+          variants: [
+            {
+              id: "variant-1",
+              createdAt: 20,
+              status: "pending"
+            }
+          ],
+          status: "pending"
+        }
+      ]
+    };
+    const current = {
+      sessions: [
+        session("active", 50, [
+          userMessage("u1", "make a card"),
+          assistantWithCompletedArtifactEdit()
+        ])
+      ],
+      activeSessionId: "active"
+    };
+    const incoming = {
+      sessions: [
+        session("active", 40, [userMessage("u1", "make a card"), pendingAssistant])
+      ],
+      activeSessionId: "active"
+    };
+
+    const merged = mergeClientSaveState(current, incoming);
+    const assistant = merged.sessions[0].messages[1];
+    const edit = assistant.artifactEdits?.[0] as
+      | { status?: string; variants?: Array<{ status?: string }> }
+      | undefined;
+
+    assert.equal(assistant.rawStream, "<chat></chat><streamui><p>Edited</p></streamui>");
+    assert.equal(edit?.status, "complete");
+    assert.equal(edit?.variants?.[0]?.status, "complete");
+  });
+
+  it("allows a newer save to discard artifact edit history", () => {
+    const current = {
+      sessions: [
+        session("active", 40, [
+          userMessage("u1", "make a card"),
+          assistantWithCompletedArtifactEdit()
+        ])
+      ],
+      activeSessionId: "active"
+    };
+    const incoming = {
+      sessions: [
+        session("active", 50, [
+          userMessage("u1", "make a card"),
+          {
+            id: "a1",
+            role: "assistant" as const,
+            content: "",
+            rawStream: "<chat></chat><streamui><p>Original</p></streamui>"
+          }
+        ])
+      ],
+      activeSessionId: "active"
+    };
+
+    const merged = mergeClientSaveState(current, incoming);
+    const assistant = merged.sessions[0].messages[1];
+
+    assert.equal(assistant.rawStream, "<chat></chat><streamui><p>Original</p></streamui>");
+    assert.equal(assistant.artifactEdits, undefined);
+    assert.equal(assistant.activeArtifactEditId, undefined);
   });
 });

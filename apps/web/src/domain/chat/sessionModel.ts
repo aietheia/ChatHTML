@@ -376,6 +376,54 @@ function hasPendingArtifactEditState(message: ClientMessage): boolean {
   );
 }
 
+function hasCompletedArtifactEditVariant(edit: ArtifactEdit): boolean {
+  return edit.variants.some(
+    (variant) => variant.status === "complete" && Boolean(variant.rawStream)
+  );
+}
+
+function hasLocalArtifactEditProgress(
+  currentSession: ChatSession,
+  serverSession: ChatSession
+): boolean {
+  for (const currentMessage of currentSession.messages) {
+    if (!hasArtifactEditState(currentMessage)) {
+      continue;
+    }
+
+    const serverMessage = serverSession.messages.find(
+      (message) => message.id === currentMessage.id
+    );
+    if (!serverMessage || !hasArtifactEditState(serverMessage)) {
+      return true;
+    }
+
+    const serverEditIds = new Set(
+      (serverMessage.artifactEdits ?? []).map((edit) => edit.id)
+    );
+    for (const edit of currentMessage.artifactEdits ?? []) {
+      if (!serverEditIds.has(edit.id)) {
+        return true;
+      }
+
+      const serverEdit = serverMessage.artifactEdits?.find(
+        (candidate) => candidate.id === edit.id
+      );
+      if (
+        hasCompletedArtifactEditVariant(edit) &&
+        !serverEdit?.variants.some(
+          (variant) =>
+            variant.status === "complete" && Boolean(variant.rawStream)
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 function shouldPreserveLocalArtifactEditSession(
   currentSession: ChatSession,
   serverSession: ChatSession
@@ -388,6 +436,13 @@ function shouldPreserveLocalArtifactEditSession(
   const hasPendingEdit = currentSession.messages.some(hasPendingArtifactEditState);
   if (hasPendingEdit) {
     return currentSession.updatedAt >= serverSession.updatedAt;
+  }
+
+  if (
+    currentSession.updatedAt >= serverSession.updatedAt &&
+    hasLocalArtifactEditProgress(currentSession, serverSession)
+  ) {
+    return true;
   }
 
   return currentSession.updatedAt > serverSession.updatedAt;

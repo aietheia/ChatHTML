@@ -477,6 +477,79 @@ describe("sessionModel", () => {
     assert.equal(assistant.artifactEdits?.[0]?.id, "edit-1");
   });
 
+  it("preserves local artifact edit progress over equal-timestamp server sync", () => {
+    const merged = mergeSyncedSessionState(
+      {
+        activeSessionId: "s1",
+        sessions: [
+          {
+            id: "s1",
+            title: "Local",
+            createdAt: 1,
+            updatedAt: 30,
+            files: [],
+            messages: [
+              { id: "u1", role: "user", content: "make a card" },
+              {
+                id: "a1",
+                role: "assistant",
+                content: "",
+                rawStream: "<chat></chat><streamui><p>Edited</p></streamui>",
+                artifactEditBaseRawStream:
+                  "<chat></chat><streamui><p>Original</p></streamui>",
+                activeArtifactEditId: "edit-1",
+                artifactEdits: [
+                  {
+                    id: "edit-1",
+                    createdAt: 20,
+                    prompt: "Change copy",
+                    references: [],
+                    activeVariantId: "variant-1",
+                    variants: [
+                      {
+                        id: "variant-1",
+                        createdAt: 20,
+                        status: "complete",
+                        rawStream:
+                          "<chat></chat><streamui><p>Edited</p></streamui>"
+                      }
+                    ],
+                    status: "complete"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        activeSessionId: "s1",
+        sessions: [
+          {
+            id: "s1",
+            title: "Server equal",
+            createdAt: 1,
+            updatedAt: 30,
+            files: [],
+            messages: [
+              { id: "u1", role: "user", content: "make a card" },
+              {
+                id: "a1",
+                role: "assistant",
+                content: "",
+                rawStream: "<chat></chat><streamui><p>Original</p></streamui>"
+              }
+            ]
+          }
+        ]
+      }
+    );
+
+    const assistant = merged.sessions[0].messages[1];
+    assert.equal(assistant.rawStream, "<chat></chat><streamui><p>Edited</p></streamui>");
+    assert.equal(assistant.artifactEdits?.[0]?.id, "edit-1");
+  });
+
   it("filters locally deleted sessions during server sync", () => {
     const merged = mergeSyncedSessionState(
       {
