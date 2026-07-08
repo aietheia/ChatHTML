@@ -20,6 +20,9 @@ type AssistantPreviewBubbleProps = {
   actions?: ReactNode;
   selectionModeActive?: boolean;
   selections?: ArtifactSelection[];
+  busySelections?: Array<
+    Pick<ArtifactSelectionPayload, "key" | "kind" | "selector">
+  >;
   onRuntimeError(id: string, error: RenderError): void;
   onArtifactAction(id: string, action: StreamUiAction): void;
   onArtifactSelection(id: string, selection: ArtifactSelectionPayload): void;
@@ -33,6 +36,7 @@ export function AssistantPreviewBubble({
   actions,
   selectionModeActive = false,
   selections = [],
+  busySelections = [],
   onRuntimeError,
   onArtifactAction,
   onArtifactSelection,
@@ -52,6 +56,7 @@ export function AssistantPreviewBubble({
           themeMode={themeMode}
           selectionModeActive={selectionModeActive}
           selectedSelections={selections}
+          busySelections={busySelections}
           onRuntimeError={(error) => onRuntimeError(id, error)}
           onArtifactAction={(action) => onArtifactAction(id, action)}
           onArtifactSelection={(selection) => onArtifactSelection(id, selection)}

@@ -38,9 +38,19 @@ type AssistantMessageProps = {
   status?: "streaming" | "complete" | "error";
   error?: string;
   artifactSelections?: ArtifactSelection[];
+  artifactBusySelections?: Array<
+    Pick<ArtifactSelectionPayload, "key" | "kind" | "selector">
+  >;
   isArtifactSelectionModeActive?: boolean;
   branchInfo?: {
     groupId: string;
+    activeIndex: number;
+    total: number;
+    previousVariantId?: string;
+    nextVariantId?: string;
+  };
+  artifactEditVariantInfo?: {
+    editId: string;
     activeIndex: number;
     total: number;
     previousVariantId?: string;
@@ -53,6 +63,11 @@ type AssistantMessageProps = {
   onVisualRepair(id: string, snapshot: RenderSnapshot, width: number): void;
   onRegenerate(id: string): void;
   onSelectBranch(groupId: string, variantId: string): void;
+  onSelectArtifactEditVariant(
+    id: string,
+    editId: string,
+    variantId: string
+  ): void;
 };
 
 function hasLikelyVisibleStreamUiContent(rawStream?: string): boolean {
@@ -89,15 +104,18 @@ export function AssistantMessage({
   status,
   error,
   artifactSelections = [],
+  artifactBusySelections = [],
   isArtifactSelectionModeActive = false,
   branchInfo,
+  artifactEditVariantInfo,
   onRuntimeError,
   onArtifactAction,
   onArtifactSelection,
   onArtifactSelectionModeChange,
   onVisualRepair,
   onRegenerate,
-  onSelectBranch
+  onSelectBranch,
+  onSelectArtifactEditVariant
 }: AssistantMessageProps) {
   const resolvedSnapshot = useMemo(() => {
     const withRuntimeErrors = (
@@ -214,7 +232,54 @@ export function AssistantMessage({
           <Wand2 size={15} strokeWidth={2.15} aria-hidden="true" />
         </button>
       ) : null}
-      {branchInfo ? (
+      {artifactEditVariantInfo ? (
+        <div className="message-branch-controls" aria-label="Edit variants">
+          <button
+            className="message-action-button"
+            type="button"
+            title="Previous edit variant"
+            aria-label="Previous edit variant"
+            disabled={
+              !artifactEditVariantInfo.previousVariantId ||
+              status === "streaming"
+            }
+            onClick={() => {
+              if (artifactEditVariantInfo.previousVariantId) {
+                onSelectArtifactEditVariant(
+                  id,
+                  artifactEditVariantInfo.editId,
+                  artifactEditVariantInfo.previousVariantId
+                );
+              }
+            }}
+          >
+            <ChevronLeft size={15} strokeWidth={2.2} aria-hidden="true" />
+          </button>
+          <span className="branch-count">
+            {artifactEditVariantInfo.activeIndex + 1}/{artifactEditVariantInfo.total}
+          </span>
+          <button
+            className="message-action-button"
+            type="button"
+            title="Next edit variant"
+            aria-label="Next edit variant"
+            disabled={
+              !artifactEditVariantInfo.nextVariantId || status === "streaming"
+            }
+            onClick={() => {
+              if (artifactEditVariantInfo.nextVariantId) {
+                onSelectArtifactEditVariant(
+                  id,
+                  artifactEditVariantInfo.editId,
+                  artifactEditVariantInfo.nextVariantId
+                );
+              }
+            }}
+          >
+            <ChevronRight size={15} strokeWidth={2.2} aria-hidden="true" />
+          </button>
+        </div>
+      ) : branchInfo ? (
         <div className="message-branch-controls" aria-label="Response branches">
           <button
             className="message-action-button"
@@ -275,6 +340,7 @@ export function AssistantMessage({
             actions={turnActions}
             selectionModeActive={isArtifactSelectionModeActive}
             selections={artifactSelections}
+            busySelections={artifactBusySelections}
             onRuntimeError={onRuntimeError}
             onArtifactAction={onArtifactAction}
             onArtifactSelection={onArtifactSelection}

@@ -130,6 +130,19 @@ describe("openrouter response stream helpers", () => {
     assert.equal(result.applied[0].occurrence, 2);
   });
 
+  it("falls back when an over-specified occurrence has a single match", () => {
+    const result = applyArtifactSourceEdits("<streamui><button>开始</button></streamui>", [
+      {
+        find: "<button>开始</button>",
+        replace: "<button>Start</button>",
+        occurrence: 2
+      }
+    ]);
+
+    assert.equal(result.rawStream, "<streamui><button>Start</button></streamui>");
+    assert.equal(result.applied[0].occurrence, 1);
+  });
+
   it("rejects ambiguous artifact source edits", () => {
     assert.throws(
       () =>

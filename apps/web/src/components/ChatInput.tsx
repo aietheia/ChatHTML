@@ -74,11 +74,13 @@ type ChatInputProps = {
   model: string;
   modelOptions: string[];
   reasoningEffort: ReasoningEffort;
+  uiComplexity: number;
   artifactSelections?: ArtifactSelection[];
   onRemoveArtifactSelection?(id: string): void;
   onClearArtifactSelections?(): void;
   onModelChange(model: string): void;
   onReasoningEffortChange(reasoningEffort: ReasoningEffort): void;
+  onUiComplexityChange(uiComplexity: number): void;
 };
 
 function ArtifactSelectionTray({
@@ -94,6 +96,9 @@ function ArtifactSelectionTray({
     return null;
   }
 
+  const getSelectionText = (selection: ArtifactSelection) =>
+    selection.preview || selection.label;
+
   return (
     <div className="artifact-selection-tray" aria-label="Selected preview regions">
       <div className="artifact-selection-list">
@@ -103,11 +108,10 @@ function ArtifactSelectionTray({
             key={selection.id}
           >
             <span className="artifact-selection-kind">
-              {selection.kind === "text" ? "Text" : "Element"}
+              {selection.kind === "text" ? "Reference" : "Element"}
             </span>
             <span className="artifact-selection-copy">
-              <strong>{selection.label}</strong>
-              <span>{selection.preview}</span>
+              <span>{getSelectionText(selection)}</span>
             </span>
             <button
               className="artifact-selection-remove"
@@ -137,11 +141,13 @@ export function ChatInput({
   model,
   modelOptions,
   reasoningEffort,
+  uiComplexity,
   artifactSelections = [],
   onRemoveArtifactSelection,
   onClearArtifactSelections,
   onModelChange,
-  onReasoningEffortChange
+  onReasoningEffortChange,
+  onUiComplexityChange
 }: ChatInputProps) {
   const attachments = useAuiState((state) => state.composer.attachments);
   const isRunning = useAuiState((state) => state.thread.isRunning);
@@ -206,9 +212,11 @@ export function ChatInput({
               model={model}
               modelOptions={modelOptions}
               reasoningEffort={reasoningEffort}
+              uiComplexity={uiComplexity}
               disabled={isRunning}
               onModelChange={onModelChange}
               onReasoningEffortChange={onReasoningEffortChange}
+              onUiComplexityChange={onUiComplexityChange}
             />
             <AuiIf condition={(state) => !state.thread.isRunning}>
               <ComposerPrimitive.Send

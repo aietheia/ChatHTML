@@ -140,7 +140,6 @@ export function ArtifactExportMenu({
   const [activeAction, setActiveAction] = useState<ArtifactExportAction | null>(
     null
   );
-  const [isHovered, setIsHovered] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
   const [status, setStatus] = useState<ExportStatus | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -154,7 +153,7 @@ export function ArtifactExportMenu({
     }),
     [filenameBase]
   );
-  const isOpen = isHovered || isPinned;
+  const isOpen = isPinned;
 
   useEffect(() => {
     if (!status || status.kind === "error") {
@@ -186,7 +185,6 @@ export function ArtifactExportMenu({
     }
 
     const closeMenu = () => {
-      setIsHovered(false);
       setIsPinned(false);
     };
 
@@ -308,10 +306,6 @@ export function ArtifactExportMenu({
       className={`artifact-export-menu ${isOpen ? "is-open" : ""} ${
         isPinned ? "is-pinned" : ""
       }`}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      onPointerEnter={() => setIsHovered(true)}
-      onPointerLeave={() => setIsHovered(false)}
     >
       <div
         className="artifact-export-popover"

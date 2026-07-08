@@ -37,7 +37,7 @@ import {
   readRuntimeApiCredentials,
   type ApiKeySource
 } from "./runtimeApiSettings.js";
-import { SYSTEM_PROMPT } from "./systemPrompt.js";
+import { SYSTEM_PROMPT, buildUiComplexityPrompt } from "./systemPrompt.js";
 import { modelLikelySupportsImageInput } from "../src/core/modelCapabilities.js";
 
 type ChatRole = "user" | "assistant" | "system";
@@ -57,6 +57,7 @@ type RuntimeApiSettings = {
   apiKey: string;
   model: string;
   reasoningEffort: OpenRouterReasoningEffort;
+  uiComplexity: number;
   userPreferencePrompt: string;
   memoryItems: MemoryItem[];
 };
@@ -989,6 +990,21 @@ function normalizeReasoningEffort(value: unknown): OpenRouterReasoningEffort {
   );
 }
 
+function normalizeUiComplexity(value: unknown, fallback = 50): number {
+  const numericValue =
+    typeof value === "string" && value.trim()
+      ? Number(value)
+      : typeof value === "number"
+        ? value
+        : fallback;
+
+  if (!Number.isFinite(numericValue)) {
+    return fallback;
+  }
+
+  return Math.min(100, Math.max(0, Math.round(numericValue)));
+}
+
 function readRuntimeApiSettings(input: unknown): RuntimeApiSettings {
   const defaults = getRuntimeApiDefaults();
   const object =
@@ -1037,6 +1053,9 @@ function readRuntimeApiSettings(input: unknown): RuntimeApiSettings {
     model,
     reasoningEffort: normalizeReasoningEffort(
       object.reasoningEffort ?? defaults.reasoningEffort
+    ),
+    uiComplexity: normalizeUiComplexity(
+      object.uiComplexity ?? defaults.uiComplexity
     ),
     userPreferencePrompt: memorySettings.userPreferencePrompt,
     memoryItems: memorySettings.memoryItems
@@ -2007,7 +2026,10 @@ export function applyArtifactSourceEdits(
       );
     }
 
-    const occurrence = edit.occurrence ?? 1;
+    const occurrence =
+      edit.occurrence && edit.occurrence > matches && matches === 1
+        ? 1
+        : edit.occurrence ?? 1;
     if (occurrence > matches) {
       throw new Error(
         `Edit ${index + 1} requested occurrence ${occurrence}, but only ${matches} matched.`
@@ -2025,7 +2047,7 @@ export function applyArtifactSourceEdits(
       current.slice(start + edit.find.length);
     applied.push({
       note: edit.note,
-      occurrence: edit.occurrence,
+      occurrence: edit.occurrence && edit.occurrence > matches ? occurrence : edit.occurrence,
       findLength: edit.find.length,
       replaceLength: edit.replace.length
     });
@@ -2222,7 +2244,7 @@ async function runOpenRouterChat(
       searchSettings
     } = run.input;
     console.info(
-      `[chat:${requestId}] start provider=${apiSettings.providerName} base_url=${apiSettings.baseUrl} model=${model} messages=${messages.length} theme=${themeMode} reasoning=${apiSettings.reasoningEffort} key_source=${apiSettings.apiKeySource} key_env=${apiSettings.apiKeyEnvironmentName}`
+      `[chat:${requestId}] start provider=${apiSettings.providerName} base_url=${apiSettings.baseUrl} model=${model} messages=${messages.length} theme=${themeMode} reasoning=${apiSettings.reasoningEffort} ui_complexity=${apiSettings.uiComplexity} key_source=${apiSettings.apiKeySource} key_env=${apiSettings.apiKeyEnvironmentName}`
     );
 
     const toolStreamState: ToolStreamState = {
@@ -2380,6 +2402,7 @@ async function runOpenRouterChat(
         buildSessionFilesContext(files),
         buildThemeContextPrompt(themeMode),
         buildCanvasContextPrompt(canvasContext),
+        buildUiComplexityPrompt(apiSettings.uiComplexity),
         buildNativeToolPrompt()
       ]
         .filter(Boolean)

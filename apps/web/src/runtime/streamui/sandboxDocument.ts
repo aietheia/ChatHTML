@@ -206,7 +206,8 @@ export function buildIframeDocument(
       cursor: crosshair;
     }
     .streamui-selection-hover,
-    .streamui-selection-selected {
+    .streamui-selection-selected,
+    .streamui-selection-busy {
       position: fixed;
       z-index: 2147483645;
       display: none;
@@ -223,6 +224,65 @@ export function buildIframeDocument(
         inset 0 0 0 2px rgba(22, 163, 74, 0.96),
         0 0 0 1px rgba(255, 255, 255, 0.75);
       background: rgba(22, 163, 74, 0.1);
+    }
+    .streamui-selection-busy {
+      z-index: 2147483643;
+      overflow: hidden;
+      border-radius: 8px;
+      box-shadow:
+        inset 0 0 0 2px rgba(37, 99, 235, 0.88),
+        0 0 0 1px rgba(255, 255, 255, 0.82),
+        0 14px 34px rgba(37, 99, 235, 0.18);
+      background: rgba(37, 99, 235, 0.2);
+      backdrop-filter: blur(3px) saturate(0.72);
+    }
+    .streamui-selection-busy::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.32), transparent 42%),
+        repeating-linear-gradient(
+          135deg,
+          rgba(37, 99, 235, 0.24) 0,
+          rgba(37, 99, 235, 0.24) 8px,
+          rgba(147, 197, 253, 0.22) 8px,
+          rgba(147, 197, 253, 0.22) 16px
+        );
+      opacity: 0.62;
+      animation: streamui-selection-busy-sheen 980ms linear infinite;
+    }
+    .streamui-selection-busy::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 26px;
+      height: 26px;
+      margin-left: -13px;
+      margin-top: -13px;
+      border: 3px solid rgba(255, 255, 255, 0.72);
+      border-top-color: #2563eb;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.82);
+      box-shadow: 0 8px 22px rgba(24, 24, 27, 0.24);
+      animation: streamui-selection-busy-spin 780ms linear infinite;
+    }
+    .streamui-selection-busy .streamui-selection-label {
+      display: none;
+    }
+    @keyframes streamui-selection-busy-spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+    @keyframes streamui-selection-busy-sheen {
+      from {
+        background-position: 0 0, 0 0;
+      }
+      to {
+        background-position: 0 0, 22px 22px;
+      }
     }
     .streamui-selection-label {
       position: absolute;
@@ -599,8 +659,10 @@ export function buildIframeDocument(
       let selectionModeEnabled = false;
       let selectionHoverTarget = null;
       let selectedSelectionTargets = [];
+      let busySelectionTargets = [];
       let hoverOverlay = null;
       let selectedOverlayLayer = null;
+      let busyOverlayLayer = null;
       let textSelectionToolbar = null;
       let textSelectionRange = null;
       let textSelectionPayload = null;
@@ -615,9 +677,11 @@ export function buildIframeDocument(
       const isInternalSelectionElement = (element) =>
         Boolean(
           element?.closest?.(
-            ".streamui-selection-hover,.streamui-selection-selected,.streamui-text-selection-toolbar"
+            ".streamui-selection-hover,.streamui-selection-selected,.streamui-selection-busy,.streamui-text-selection-toolbar"
           )
         );
+      const OVERSIZED_SELECTION_EDGE_TOLERANCE = 32;
+      const OVERSIZED_SELECTION_AREA_RATIO = 0.86;
       const coversIframeViewport = (rect) => {
         const viewportWidth = Math.max(
           1,
@@ -634,6 +698,43 @@ export function buildIframeDocument(
           rect.height >= viewportHeight - 2
         );
       };
+      const isOversizedSelectionTarget = (element) => {
+        if (!(element instanceof Element)) {
+          return false;
+        }
+
+        const rect = element.getBoundingClientRect();
+        const viewportWidth = Math.max(
+          1,
+          document.documentElement?.clientWidth || window.innerWidth
+        );
+        const viewportHeight = Math.max(
+          1,
+          document.documentElement?.clientHeight || window.innerHeight
+        );
+        const visibleLeft = Math.max(0, rect.left);
+        const visibleTop = Math.max(0, rect.top);
+        const visibleRight = Math.min(viewportWidth, rect.right);
+        const visibleBottom = Math.min(viewportHeight, rect.bottom);
+        const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+        const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+        const visibleAreaRatio =
+          (visibleWidth * visibleHeight) / (viewportWidth * viewportHeight);
+        const nearlyFullWidth =
+          rect.left <= OVERSIZED_SELECTION_EDGE_TOLERANCE &&
+          rect.right >= viewportWidth - OVERSIZED_SELECTION_EDGE_TOLERANCE;
+        const nearlyFullHeight =
+          rect.top <= OVERSIZED_SELECTION_EDGE_TOLERANCE &&
+          rect.bottom >= viewportHeight - OVERSIZED_SELECTION_EDGE_TOLERANCE;
+
+        return (
+          coversIframeViewport(rect) ||
+          (nearlyFullWidth && nearlyFullHeight) ||
+          (visibleAreaRatio >= OVERSIZED_SELECTION_AREA_RATIO &&
+            visibleWidth >= viewportWidth * 0.75 &&
+            visibleHeight >= viewportHeight * 0.75)
+        );
+      };
       const isElementVisibleForSelection = (element) => {
         if (!(element instanceof Element) || selectionSkipTags.has(element.tagName)) {
           return false;
@@ -643,7 +744,7 @@ export function buildIframeDocument(
         if (rect.width < 1 || rect.height < 1) {
           return false;
         }
-        if (coversIframeViewport(rect)) {
+        if (isOversizedSelectionTarget(element)) {
           return false;
         }
 
@@ -705,8 +806,7 @@ export function buildIframeDocument(
 
           if (id && isSafeCssIdentifier(id)) {
             part += "#" + id;
-            parts.unshift(part);
-            break;
+            return part;
           }
 
           const classNames = Array.from(current.classList || [])
@@ -741,15 +841,168 @@ export function buildIframeDocument(
         return (
           tagName +
           (id && isSafeCssIdentifier(id) ? "#" + id : "") +
-          (classNames.length ? "." + classNames.join(".") : "")
+            (classNames.length ? "." + classNames.join(".") : "")
         );
+      };
+      const textHiddenTags = new Set([
+        "SCRIPT",
+        "STYLE",
+        "TEMPLATE",
+        "NOSCRIPT"
+      ]);
+      const isElementHiddenForSelectionText = (element, root) => {
+        let current = element;
+        while (current && current instanceof Element && current !== root.parentElement) {
+          if (
+            textHiddenTags.has(current.tagName) ||
+            current.getAttribute("aria-hidden") === "true" ||
+            isInternalSelectionElement(current)
+          ) {
+            return true;
+          }
+
+          const style = getComputedStyle(current);
+          if (
+            style.display === "none" ||
+            style.visibility === "hidden" ||
+            style.visibility === "collapse"
+          ) {
+            return true;
+          }
+
+          if (current === root) {
+            break;
+          }
+          current = current.parentElement;
+        }
+
+        return false;
+      };
+      const normalizeCssGeneratedText = (value) => {
+        const content = String(value || "").trim();
+        if (!content || content === "none" || content === "normal") {
+          return "";
+        }
+
+        return content
+          .replace(/^["']|["']$/g, "")
+          .replace(/\\\\A/g, " ")
+          .replace(/\\\\0000a/gi, " ");
+      };
+      const isDomLikeSelectionLabel = (value) =>
+        /^[a-z][a-z0-9-]*(?:[#.:\[][^\s]*)?$/i.test(compactSelectionText(value));
+      const getSelectionPreviewFromHtml = (html) => {
+        if (!html) {
+          return "";
+        }
+
+        const template = document.createElement("template");
+        template.innerHTML = String(html || "");
+        template.content
+          .querySelectorAll("script,style,template,noscript,[aria-hidden='true']")
+          .forEach((node) => node.remove());
+
+        const root = template.content.firstElementChild;
+        if (!root) {
+          return truncateSelectionText(
+            template.content.textContent,
+            MAX_SELECTION_PREVIEW_CHARS
+          );
+        }
+
+        const controlValue =
+          "value" in root && typeof root.value === "string" ? root.value : "";
+        const text =
+          controlValue ||
+          root.getAttribute("aria-label") ||
+          root.getAttribute("title") ||
+          root.textContent ||
+          "";
+        return truncateSelectionText(text, MAX_SELECTION_PREVIEW_CHARS);
+      };
+      const getPseudoElementText = (element) =>
+        compactSelectionText(
+          normalizeCssGeneratedText(getComputedStyle(element, "::before").content) +
+            " " +
+            normalizeCssGeneratedText(getComputedStyle(element, "::after").content)
+        );
+      const getVisibleElementText = (element) => {
+        if (!(element instanceof Element)) {
+          return "";
+        }
+
+        const parts = [];
+        const pushText = (value) => {
+          const text = compactSelectionText(value);
+          if (!text) {
+            return;
+          }
+          parts.push(text);
+        };
+
+        pushText(getPseudoElementText(element));
+
+        const elementWalker = document.createTreeWalker(
+          element,
+          NodeFilter.SHOW_ELEMENT,
+          {
+            acceptNode(node) {
+              return node instanceof Element &&
+                !isElementHiddenForSelectionText(node, element)
+                ? NodeFilter.FILTER_ACCEPT
+                : NodeFilter.FILTER_REJECT;
+            }
+          }
+        );
+        let elementNode = elementWalker.nextNode();
+        while (elementNode) {
+          pushText(getPseudoElementText(elementNode));
+          elementNode = elementWalker.nextNode();
+        }
+
+        const walker = document.createTreeWalker(
+          element,
+          NodeFilter.SHOW_TEXT,
+          {
+            acceptNode(node) {
+              const text = compactSelectionText(node.nodeValue);
+              const parent = node.parentElement;
+              if (!text || !parent) {
+                return NodeFilter.FILTER_REJECT;
+              }
+
+              return isElementHiddenForSelectionText(parent, element)
+                ? NodeFilter.FILTER_REJECT
+                : NodeFilter.FILTER_ACCEPT;
+            }
+          }
+        );
+
+        let node = walker.nextNode();
+        while (node) {
+          pushText(node.nodeValue);
+          if (parts.join(" ").length >= MAX_SELECTION_PREVIEW_CHARS) {
+            break;
+          }
+          node = walker.nextNode();
+        }
+
+        if (!parts.length && typeof element.textContent === "string") {
+          pushText(element.textContent);
+        }
+
+        return truncateSelectionText(parts.join(" "), MAX_SELECTION_PREVIEW_CHARS);
       };
       const getElementPreview = (element) => {
         if ("value" in element && typeof element.value === "string") {
           return truncateSelectionText(element.value, MAX_SELECTION_PREVIEW_CHARS);
         }
 
+        const visibleText = getVisibleElementText(element);
+        const htmlText = getSelectionPreviewFromHtml(element.outerHTML || "");
         const accessibleText =
+          visibleText ||
+          htmlText ||
           element.getAttribute("aria-label") ||
           element.getAttribute("title") ||
           element.getAttribute("alt") ||
@@ -758,13 +1011,44 @@ export function buildIframeDocument(
           "";
         return truncateSelectionText(accessibleText, MAX_SELECTION_PREVIEW_CHARS);
       };
+      const getElementDisplayLabel = (element) => {
+        const preview = getElementPreview(element);
+        if (preview && !isDomLikeSelectionLabel(preview)) {
+          return preview;
+        }
+
+        return (
+          getSelectionPreviewFromHtml(element.outerHTML || "") ||
+          preview ||
+          getElementLabel(element)
+        );
+      };
+      const getSelectionTargetLabel = (target, element) => {
+        const preview = truncateSelectionText(
+          target?.preview || target?.label || "",
+          120
+        );
+        if (preview) {
+          return preview;
+        }
+
+        return getElementDisplayLabel(element);
+      };
       const resolveSelectedTarget = (target) => {
         if (!target || typeof target.selector !== "string") {
           return null;
         }
 
         try {
-          return document.querySelector(target.selector);
+          const element = document.querySelector(target.selector);
+          if (element) {
+            return element;
+          }
+
+          const legacyIdSelector = /^body\s*>\s*([a-z][a-z0-9-]*#[a-zA-Z_-][a-zA-Z0-9_-]*)$/i.exec(
+            target.selector
+          );
+          return legacyIdSelector ? document.querySelector(legacyIdSelector[1]) : null;
         } catch {
           return null;
         }
@@ -830,7 +1114,11 @@ export function buildIframeDocument(
         if (!hoverOverlay) {
           hoverOverlay = createSelectionOverlay("streamui-selection-hover");
         }
-        placeSelectionOverlay(hoverOverlay, element, getElementLabel(element));
+        placeSelectionOverlay(
+          hoverOverlay,
+          element,
+          getElementDisplayLabel(element)
+        );
       };
       const renderSelectedSelectionTargets = () => {
         if (!document.body) {
@@ -846,7 +1134,7 @@ export function buildIframeDocument(
         selectedOverlayLayer.replaceChildren();
         selectedSelectionTargets.forEach((target) => {
           const element = resolveSelectedTarget(target);
-          if (!element) {
+          if (!element || isOversizedSelectionTarget(element)) {
             return;
           }
 
@@ -858,14 +1146,38 @@ export function buildIframeDocument(
           placeSelectionOverlay(
             overlay,
             element,
-            target.kind === "text"
-              ? "text: " + getElementLabel(element)
-              : getElementLabel(element)
+            getSelectionTargetLabel(target, element)
           );
         });
       };
+      const renderBusySelectionTargets = () => {
+        if (!document.body) {
+          return;
+        }
+
+        if (!busyOverlayLayer) {
+          busyOverlayLayer = document.createElement("div");
+          busyOverlayLayer.setAttribute("aria-hidden", "true");
+          document.body.appendChild(busyOverlayLayer);
+        }
+
+        busyOverlayLayer.replaceChildren();
+        busySelectionTargets.forEach((target) => {
+          const element = resolveSelectedTarget(target);
+          if (!element || isOversizedSelectionTarget(element)) {
+            return;
+          }
+
+          const overlay = createSelectionOverlay("streamui-selection-busy");
+          if (!overlay) {
+            return;
+          }
+          busyOverlayLayer.appendChild(overlay);
+          placeSelectionOverlay(overlay, element, "Editing");
+        });
+      };
       const createSelectionPayload = (kind, element, selectedText = "") => {
-        if (!(element instanceof Element)) {
+        if (!(element instanceof Element) || isOversizedSelectionTarget(element)) {
           return null;
         }
 
@@ -923,6 +1235,12 @@ export function buildIframeDocument(
         if (!selectionModeEnabled) {
           hideSelectionHover();
         }
+      };
+      const exitSelectionMode = () => {
+        setSelectionModeEnabled(false);
+        post("selection-mode-change", "selection-mode-change", {
+          enabled: false
+        });
       };
       const hideTextSelectionToolbar = () => {
         textSelectionRange = null;
@@ -1103,6 +1421,21 @@ export function buildIframeDocument(
                 .slice(0, 16)
             : [];
           renderSelectedSelectionTargets();
+          return;
+        }
+
+        if (data.source === "streamui-host" && data.kind === "selection-busy-targets") {
+          busySelectionTargets = Array.isArray(data.targets)
+            ? data.targets
+                .filter(
+                  (target) =>
+                    target &&
+                    typeof target.selector === "string" &&
+                    (target.kind === "element" || target.kind === "text")
+                )
+                .slice(0, 16)
+            : [];
+          renderBusySelectionTargets();
         }
       });
       const findCapabilityAction = (target) => {
@@ -1238,10 +1571,7 @@ export function buildIframeDocument(
         if (event.key === "Escape") {
           hideTextSelectionToolbar();
           if (selectionModeEnabled) {
-            setSelectionModeEnabled(false);
-            post("selection-mode-change", "selection-mode-change", {
-              enabled: false
-            });
+            exitSelectionMode();
           }
         }
       }, true);
@@ -1252,12 +1582,13 @@ export function buildIframeDocument(
         if (isInternalSelectionElement(event.target)) {
           return;
         }
-        if (hasActiveTextSelection()) {
-          return;
-        }
 
         const element = findSelectableElement(event.target);
         if (!element) {
+          event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+          exitSelectionMode();
           return;
         }
 
@@ -1363,6 +1694,7 @@ export function buildIframeDocument(
           updateSelectionHover(selectionHoverTarget);
         }
         renderSelectedSelectionTargets();
+        renderBusySelectionTargets();
         updateTextSelectionToolbar();
       };
       const scheduleSelectionUiRefresh = () => {

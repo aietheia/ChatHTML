@@ -67,6 +67,11 @@ describe("sandboxDocument", () => {
       /<button type="button" data-selection-kind="element">Element<\/button>/
     );
     assert.match(document, /coversIframeViewport/);
+    assert.match(document, /OVERSIZED_SELECTION_EDGE_TOLERANCE/);
+    assert.match(document, /isOversizedSelectionTarget/);
+    assert.match(document, /exitSelectionMode/);
+    assert.match(document, /return part;/);
+    assert.match(document, /legacyIdSelector/);
   });
 
   it("includes the local capability action bridge", () => {

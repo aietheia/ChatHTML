@@ -1,8 +1,12 @@
 import { MessagePrimitive } from "@assistant-ui/react";
 import { Check, Pencil, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import type { ArtifactEdit, SessionFile } from "../domain/chat/sessionModel";
+import type {
+  ArtifactEdit,
+  ArtifactEditReference,
+  SessionFile
+} from "../domain/chat/sessionModel";
 
 type ArtifactEditTimeline = {
   assistantId: string;
@@ -18,125 +22,400 @@ type ChatMessageProps = {
   artifactEditTimeline?: ArtifactEditTimeline;
   onEdit?(id: string, content: string): void;
   onSelectArtifactEdit?(assistantId: string, editId?: string): void;
+  onDiscardArtifactEditTail?(assistantId: string, editId?: string): boolean;
+  onEditArtifactEditPrompt?(
+    assistantId: string,
+    editId: string,
+    prompt: string
+  ): boolean;
   children: ReactNode;
 };
 
-const ARTIFACT_EDIT_ROOT_KEY = "__artifact_edit_root__";
+function hasUsableArtifactEditVariant(edit: ArtifactEdit): boolean {
+  if (edit.status !== "complete") {
+    return false;
+  }
 
-function ArtifactEditTimelineView({
-  timeline,
-  onSelectArtifactEdit
+  const activeVariant = getArtifactEditActiveVariant(edit);
+  return activeVariant?.status === "complete" && Boolean(activeVariant.rawStream);
+}
+
+function getActiveArtifactVersionIndex(
+  timeline: ArtifactEditTimeline,
+  edits: ArtifactEdit[]
+): number {
+  if (!timeline.activeEditId) {
+    return 0;
+  }
+
+  const index = edits.findIndex((edit) => edit.id === timeline.activeEditId);
+  return index >= 0 ? index + 1 : -1;
+}
+
+function getArtifactEditActiveVariant(edit: ArtifactEdit) {
+  return (
+    edit.variants.find((variant) => variant.id === edit.activeVariantId) ??
+    edit.variants[0]
+  );
+}
+
+function getArtifactReferenceText(reference: ArtifactEditReference): string {
+  return reference.preview || reference.label;
+}
+
+function ArtifactEditReferenceChip({
+  references
 }: {
-  timeline: ArtifactEditTimeline;
-  onSelectArtifactEdit?(assistantId: string, editId?: string): void;
+  references: ArtifactEditReference[];
 }) {
-  const { assistantId, edits, activeEditId, disabled } = timeline;
-  const { childrenByParentId, editIndexById } = useMemo(() => {
-    const existingIds = new Set(edits.map((edit) => edit.id));
-    const indexById = new Map(edits.map((edit, index) => [edit.id, index]));
-    const grouped = new Map<string, ArtifactEdit[]>();
-
-    for (const edit of edits) {
-      const parentKey =
-        edit.parentId && existingIds.has(edit.parentId)
-          ? edit.parentId
-          : ARTIFACT_EDIT_ROOT_KEY;
-      const children = grouped.get(parentKey) ?? [];
-      children.push(edit);
-      grouped.set(parentKey, children);
-    }
-
-    grouped.forEach((children) => {
-      children.sort(
-        (left, right) =>
-          (indexById.get(left.id) ?? 0) - (indexById.get(right.id) ?? 0)
-      );
-    });
-
-    return {
-      childrenByParentId: grouped,
-      editIndexById: indexById
-    };
-  }, [edits]);
-
-  if (!edits.length) {
+  const reference = references[0];
+  if (!reference) {
     return null;
   }
 
-  const renderEdit = (edit: ArtifactEdit): ReactNode => {
-    const index = editIndexById.get(edit.id) ?? 0;
-    const activeVariantIndex = Math.max(
-      0,
-      edit.variants.findIndex((variant) => variant.id === edit.activeVariantId)
-    );
-    const activeVariant =
-      edit.variants[activeVariantIndex] ?? edit.variants[0];
-    const variantTotal = Math.max(1, edit.variants.length);
-    const canSelect =
-      edit.status === "complete" &&
-      activeVariant?.status === "complete" &&
-      Boolean(activeVariant.rawStream) &&
-      !disabled &&
-      Boolean(onSelectArtifactEdit);
-    const children = childrenByParentId.get(edit.id) ?? [];
+  return (
+    <span className={`artifact-edit-reference-chip is-${reference.kind}`}>
+      <span className="artifact-selection-kind">
+        {reference.kind === "text" ? "Reference" : "Element"}
+      </span>
+      <span className="artifact-edit-reference-text">
+        {getArtifactReferenceText(reference)}
+      </span>
+      {references.length > 1 ? (
+        <span className="artifact-edit-reference-more">
+          +{references.length - 1}
+        </span>
+      ) : null}
+    </span>
+  );
+}
 
-    return (
-      <div className="artifact-edit-node" key={edit.id}>
-        <button
-          className={`artifact-edit-card is-${edit.status} ${
-            activeEditId === edit.id ? "is-active" : ""
-          }`}
-          type="button"
-          disabled={!canSelect}
-          onClick={() => onSelectArtifactEdit?.(assistantId, edit.id)}
-        >
-          <span className="artifact-edit-card-header">
-            <span>Change {index + 1}</span>
-            <span className="artifact-edit-variant-count">
-              {activeVariantIndex + 1}/{variantTotal}
-            </span>
-          </span>
-          <span className="artifact-edit-reference-row">
-            {edit.references.slice(0, 3).map((reference) => (
-              <span
-                className={`artifact-edit-reference is-${reference.kind}`}
-                key={reference.key}
-              >
-                {reference.kind === "text" ? "Reference" : reference.label}
-              </span>
-            ))}
-            {edit.references.length > 3 ? (
-              <span className="artifact-edit-reference">
-                +{edit.references.length - 3}
-              </span>
-            ) : null}
-          </span>
-          <span className="artifact-edit-prompt">{edit.prompt}</span>
-          {edit.status === "pending" ? (
-            <span className="artifact-edit-status">Editing...</span>
-          ) : null}
-          {edit.status === "error" && (edit.error || activeVariant?.error) ? (
-            <span className="artifact-edit-status is-error">
-              {edit.error || activeVariant?.error}
-            </span>
-          ) : null}
-        </button>
-        {children.length ? (
-          <div className="artifact-edit-children">
-            {children.map((child) => renderEdit(child))}
-          </div>
-        ) : null}
+function ArtifactEditPromptConfirmDialog({
+  discardCount,
+  onCancel,
+  onConfirm
+}: {
+  discardCount: number;
+  onCancel(): void;
+  onConfirm(): void;
+}) {
+  const changeLabel = discardCount === 1 ? "change" : "changes";
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onCancel();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [onCancel]);
+
+  return (
+    <div
+      className="artifact-tail-discard-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="artifact-edit-prompt-confirm-title"
+    >
+      <div className="artifact-tail-discard-dialog">
+        <div className="artifact-tail-discard-copy">
+          <h2 id="artifact-edit-prompt-confirm-title">Edit this prompt?</h2>
+          <p>
+            Editing this prompt will discard {discardCount} later {changeLabel}.
+            The reference stays the same.
+          </p>
+        </div>
+        <div className="artifact-tail-discard-actions">
+          <button
+            className="artifact-tail-discard-secondary"
+            type="button"
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <button
+            className="artifact-tail-discard-primary"
+            type="button"
+            autoFocus
+            onClick={onConfirm}
+          >
+            Discard and edit
+          </button>
+        </div>
       </div>
+    </div>
+  );
+}
+
+function ArtifactEditTimelineView({
+  timeline,
+  onSelectArtifactEdit,
+  onDiscardArtifactEditTail,
+  onEditArtifactEditPrompt
+}: {
+  timeline: ArtifactEditTimeline;
+  onSelectArtifactEdit?(assistantId: string, editId?: string): void;
+  onDiscardArtifactEditTail?(assistantId: string, editId?: string): boolean;
+  onEditArtifactEditPrompt?(
+    assistantId: string,
+    editId: string,
+    prompt: string
+  ): boolean;
+}) {
+  const [editingEditId, setEditingEditId] = useState<string | null>(null);
+  const [draftPrompt, setDraftPrompt] = useState("");
+  const [confirmPromptEdit, setConfirmPromptEdit] = useState<{
+    editId: string;
+    prompt: string;
+    discardCount: number;
+  } | null>(null);
+  const usableEdits = timeline.edits.filter(hasUsableArtifactEditVariant);
+  const pendingEdits = timeline.edits.filter((edit) => edit.status === "pending");
+  const failedEdits = timeline.edits.filter(
+    (edit) => edit.status === "error" && !hasUsableArtifactEditVariant(edit)
+  );
+  const closePromptEditor = () => {
+    setEditingEditId(null);
+    setDraftPrompt("");
+  };
+
+  useEffect(() => {
+    if (!editingEditId) {
+      return;
+    }
+
+    if (!usableEdits.some((edit) => edit.id === editingEditId)) {
+      closePromptEditor();
+    }
+  }, [editingEditId, usableEdits]);
+
+  if (!usableEdits.length && !pendingEdits.length && !failedEdits.length) {
+    return null;
+  }
+
+  const activeVersionIndex = getActiveArtifactVersionIndex(timeline, usableEdits);
+  const openPromptEditor = (edit: ArtifactEdit) => {
+    setEditingEditId(edit.id);
+    setDraftPrompt(edit.prompt);
+  };
+
+  const requestPromptEdit = (edit: ArtifactEdit, index: number) => {
+    if (timeline.disabled || !onEditArtifactEditPrompt) {
+      return;
+    }
+
+    const discardCount = usableEdits.length - index - 1;
+    if (discardCount > 0) {
+      setConfirmPromptEdit({
+        editId: edit.id,
+        prompt: edit.prompt,
+        discardCount
+      });
+      return;
+    }
+
+    openPromptEditor(edit);
+  };
+
+  const confirmMiddlePromptEdit = () => {
+    const intent = confirmPromptEdit;
+    if (!intent) {
+      return;
+    }
+
+    setConfirmPromptEdit(null);
+    const didDiscard = onDiscardArtifactEditTail?.(
+      timeline.assistantId,
+      intent.editId
     );
+    if (didDiscard) {
+      setEditingEditId(intent.editId);
+      setDraftPrompt(intent.prompt);
+    }
+  };
+
+  const savePromptEdit = (edit: ArtifactEdit) => {
+    const normalized = draftPrompt.trim();
+    if (!normalized) {
+      return;
+    }
+
+    if (normalized === edit.prompt.trim()) {
+      closePromptEditor();
+      return;
+    }
+
+    const didStart = onEditArtifactEditPrompt?.(
+      timeline.assistantId,
+      edit.id,
+      normalized
+    );
+    if (didStart) {
+      closePromptEditor();
+    }
   };
 
   return (
-    <div className="artifact-edit-chain" aria-label="Artifact changes">
-      <div className="artifact-edit-children is-root">
-        {(childrenByParentId.get(ARTIFACT_EDIT_ROOT_KEY) ?? []).map((edit) =>
-          renderEdit(edit)
-        )}
-      </div>
+    <div className="artifact-edit-linear-list" aria-label="Artifact edits">
+      {usableEdits.map((edit, index) => {
+        const activeVariant = getArtifactEditActiveVariant(edit);
+        const canSelect =
+          edit.status === "complete" &&
+            activeVariant?.status === "complete" &&
+            Boolean(activeVariant.rawStream) &&
+            !timeline.disabled &&
+            Boolean(onSelectArtifactEdit);
+        const canEditPrompt =
+          edit.status === "complete" &&
+          activeVariant?.status === "complete" &&
+          Boolean(activeVariant.rawStream) &&
+          !timeline.disabled &&
+          Boolean(onEditArtifactEditPrompt);
+        const isActive = activeVersionIndex === index + 1;
+
+        if (editingEditId === edit.id) {
+          const normalizedDraft = draftPrompt.trim();
+          const canSave =
+            normalizedDraft.length > 0 &&
+            normalizedDraft !== edit.prompt.trim();
+
+          return (
+            <div
+              className={`message-bubble user artifact-edit-bubble is-editing ${
+                isActive ? "is-artifact-edit-active" : ""
+              }`}
+              key={edit.id}
+            >
+              <ArtifactEditReferenceChip references={edit.references} />
+              <textarea
+                className="artifact-edit-prompt-input"
+                value={draftPrompt}
+                rows={Math.max(
+                  1,
+                  Math.min(5, draftPrompt.split(/\r?\n/).length + 1)
+                )}
+                autoFocus
+                onChange={(event) => setDraftPrompt(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    closePromptEditor();
+                  }
+                  if (
+                    (event.metaKey || event.ctrlKey) &&
+                    event.key === "Enter"
+                  ) {
+                    savePromptEdit(edit);
+                  }
+                }}
+              />
+              <div className="message-edit-actions artifact-edit-prompt-actions">
+                <button
+                  className="message-action-button"
+                  type="button"
+                  title="Cancel edit"
+                  aria-label="Cancel edit"
+                  onClick={closePromptEditor}
+                >
+                  <X size={15} strokeWidth={2.2} aria-hidden="true" />
+                </button>
+                <button
+                  className="message-action-button"
+                  type="button"
+                  title="Save edit"
+                  aria-label="Save edit"
+                  disabled={!canSave}
+                  onClick={() => savePromptEdit(edit)}
+                >
+                  <Check size={15} strokeWidth={2.2} aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div
+            className="bubble-action-shell artifact-edit-action-shell"
+            key={edit.id}
+          >
+            <button
+              className={`message-bubble user artifact-edit-bubble is-${edit.status} ${
+                isActive ? "is-artifact-edit-active" : ""
+              }`}
+              type="button"
+              disabled={!canSelect}
+              title="Show edit"
+              aria-label="Show edit"
+              onClick={() => onSelectArtifactEdit?.(timeline.assistantId, edit.id)}
+            >
+              <ArtifactEditReferenceChip references={edit.references} />
+              <p>{edit.prompt}</p>
+            </button>
+            {canEditPrompt ? (
+              <button
+                className="message-action-button bubble-edit-button"
+                type="button"
+                title="Edit prompt"
+                aria-label="Edit prompt"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  requestPromptEdit(edit, index);
+                }}
+              >
+                <Pencil size={14} strokeWidth={2.15} aria-hidden="true" />
+              </button>
+            ) : null}
+          </div>
+        );
+      })}
+      {pendingEdits.map((edit) => (
+        <button
+          className={`message-bubble user artifact-edit-bubble is-pending is-artifact-edit-pending ${
+            timeline.activeEditId === edit.id ? "is-artifact-edit-active" : ""
+          }`}
+          key={edit.id}
+          type="button"
+          disabled
+          role="status"
+        >
+          <ArtifactEditReferenceChip references={edit.references} />
+          <p>{edit.prompt}</p>
+          <span
+            className="artifact-edit-loading-spinner"
+            aria-label="Editing"
+          />
+        </button>
+      ))}
+      {failedEdits.map((edit) => (
+        <div className="artifact-edit-status-row is-error" key={edit.id}>
+          <ArtifactEditReferenceChip references={edit.references} />
+          <span className="artifact-edit-status-text">{edit.prompt}</span>
+          <button
+            className="artifact-edit-discard-button"
+            type="button"
+            disabled={timeline.disabled || !onDiscardArtifactEditTail}
+            onClick={() =>
+              onDiscardArtifactEditTail?.(
+                timeline.assistantId,
+                timeline.activeEditId
+              )
+            }
+          >
+            <X size={13} strokeWidth={2.25} aria-hidden="true" />
+            <span>Dismiss</span>
+          </button>
+        </div>
+      ))}
+      {confirmPromptEdit ? (
+        <ArtifactEditPromptConfirmDialog
+          discardCount={confirmPromptEdit.discardCount}
+          onCancel={() => setConfirmPromptEdit(null)}
+          onConfirm={confirmMiddlePromptEdit}
+        />
+      ) : null}
     </div>
   );
 }
@@ -148,6 +427,8 @@ export function ChatMessage({
   artifactEditTimeline,
   onEdit,
   onSelectArtifactEdit,
+  onDiscardArtifactEditTail,
+  onEditArtifactEditPrompt,
   children
 }: ChatMessageProps) {
   const text = typeof children === "string" ? children : "";
@@ -161,6 +442,8 @@ export function ChatMessage({
     !isEditing &&
     Boolean(artifactEditTimeline) &&
     Boolean(onSelectArtifactEdit);
+  const canShowEditButton =
+    canEdit && !isEditing && !artifactEditTimeline?.disabled;
 
   useEffect(() => {
     if (!isEditing) {
@@ -248,37 +531,45 @@ export function ChatMessage({
         {role === "user" ? "U" : "S"}
       </div>
       <div className="user-message-shell">
-        {canSelectOriginal ? (
-          <button
-            className={bubbleClassName}
-            type="button"
-            title="Show original artifact"
-            aria-label="Show original artifact"
-            disabled={artifactEditTimeline?.disabled}
-            onClick={() =>
-              onSelectArtifactEdit?.(artifactEditTimeline?.assistantId ?? "")
-            }
-          >
-            {messageContent}
-          </button>
-        ) : (
-          <div className={bubbleClassName}>{messageContent}</div>
-        )}
-        {canEdit && !isEditing ? (
-          <button
-            className="message-action-button user-edit-button"
-            type="button"
-            title="Edit message"
-            aria-label="Edit message"
-            onClick={() => setIsEditing(true)}
-          >
-            <Pencil size={14} strokeWidth={2.15} aria-hidden="true" />
-          </button>
-        ) : null}
+        <div className="bubble-action-shell user-bubble-action-shell">
+          {canSelectOriginal ? (
+            <button
+              className={bubbleClassName}
+              type="button"
+              title="Show original artifact"
+              aria-label="Show original artifact"
+              disabled={artifactEditTimeline?.disabled}
+              onClick={() =>
+                onSelectArtifactEdit?.(artifactEditTimeline?.assistantId ?? "")
+              }
+            >
+              {messageContent}
+            </button>
+          ) : (
+            <div className={bubbleClassName}>{messageContent}</div>
+          )}
+          {canShowEditButton ? (
+            <button
+              className="message-action-button bubble-edit-button user-edit-button"
+              type="button"
+              title="Edit prompt"
+              aria-label="Edit prompt"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setIsEditing(true);
+              }}
+            >
+              <Pencil size={14} strokeWidth={2.15} aria-hidden="true" />
+            </button>
+          ) : null}
+        </div>
         {artifactEditTimeline ? (
           <ArtifactEditTimelineView
             timeline={artifactEditTimeline}
             onSelectArtifactEdit={onSelectArtifactEdit}
+            onDiscardArtifactEditTail={onDiscardArtifactEditTail}
+            onEditArtifactEditPrompt={onEditArtifactEditPrompt}
           />
         ) : null}
       </div>
