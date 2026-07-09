@@ -68,10 +68,14 @@ function clampSliderIndex(value: string): number {
 
 function getSliderStyle(value: number, min: number, max: number): CSSProperties {
   const range = Math.max(1, max - min);
-  const progress = ((value - min) / range) * 100;
+  const ratio = Math.min(1, Math.max(0, (value - min) / range));
+  const progress = ratio * 100;
+  const thumbSize = 18;
+  const centerOffset = thumbSize / 2 - ratio * thumbSize;
 
   return {
-    "--slider-progress": `${Math.min(100, Math.max(0, progress))}%`
+    "--slider-progress": `${progress}%`,
+    "--slider-fill": `calc(${progress}% + ${centerOffset.toFixed(2)}px)`
   } as CSSProperties;
 }
 
@@ -208,7 +212,7 @@ export function ChatModelSelector({
           ) : null}
 
           <div className="chat-model-menu" role="menu" aria-label="Model controls">
-            <div className="chat-model-slider-block">
+            <div className="chat-model-slider-block is-reasoning">
               <div className="chat-model-slider-header">
                 <span>Reasoning</span>
                 <strong>{reasoningLabel || "Off"}</strong>
@@ -236,16 +240,14 @@ export function ChatModelSelector({
                     onReasoningEffortChange(REASONING_OPTIONS[nextIndex].value);
                   }}
                 />
-              </div>
-              <div className="chat-model-slider-captions" aria-hidden="true">
-                {REASONING_OPTIONS.map((option) => (
-                  <span key={option.value}>{option.label}</span>
-                ))}
+                <span className="chat-model-slider-thumb" aria-hidden="true">
+                  <span />
+                </span>
               </div>
             </div>
-            <div className="chat-model-slider-block">
+            <div className="chat-model-slider-block is-ui">
               <div className="chat-model-slider-header">
-                <span>UI complexity</span>
+                <span>UI</span>
                 <strong>{normalizedUiComplexity}</strong>
               </div>
               <div
@@ -276,10 +278,9 @@ export function ChatModelSelector({
                     onUiComplexityChange(normalizeUiComplexity(event.target.value))
                   }
                 />
-              </div>
-              <div className="chat-model-slider-captions" aria-hidden="true">
-                <span>Simple</span>
-                <span>Detailed</span>
+                <span className="chat-model-slider-thumb" aria-hidden="true">
+                  <span />
+                </span>
               </div>
             </div>
             <div className="chat-model-menu-separator" />

@@ -56,10 +56,12 @@ type AssistantMessageProps = {
     previousVariantId?: string;
     nextVariantId?: string;
   };
+  activeReasoningMessageId?: string;
   onRuntimeError(id: string, error: RenderError): void;
   onArtifactAction(id: string, action: StreamUiAction): void;
   onArtifactSelection(id: string, selection: ArtifactSelectionPayload): void;
   onArtifactSelectionModeChange(id: string, enabled: boolean): void;
+  onOpenReasoningActivity(id: string): void;
   onVisualRepair(id: string, snapshot: RenderSnapshot, width: number): void;
   onRegenerate(id: string): void;
   onSelectBranch(groupId: string, variantId: string): void;
@@ -108,10 +110,12 @@ export function AssistantMessage({
   isArtifactSelectionModeActive = false,
   branchInfo,
   artifactEditVariantInfo,
+  activeReasoningMessageId,
   onRuntimeError,
   onArtifactAction,
   onArtifactSelection,
   onArtifactSelectionModeChange,
+  onOpenReasoningActivity,
   onVisualRepair,
   onRegenerate,
   onSelectBranch,
@@ -324,8 +328,11 @@ export function AssistantMessage({
       </div>
       <div className="assistant-stack">
         <ReasoningPanel
+          messageId={id}
           reasoning={reasoning}
           isStreaming={status === "streaming"}
+          isActive={activeReasoningMessageId === id}
+          onOpenActivity={onOpenReasoningActivity}
         />
         <AssistantTextBubble
           content={content}

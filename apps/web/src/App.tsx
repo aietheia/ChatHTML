@@ -6,6 +6,7 @@ import {
   useRef,
   useState
 } from "react";
+import { CheckCircle2, LoaderCircle, X } from "lucide-react";
 import {
   AssistantRuntimeProvider,
   AuiIf,
@@ -19,6 +20,7 @@ import { AssistantMessage } from "./components/AssistantMessage";
 import { ChatInput } from "./components/ChatInput";
 import { ChatMessage } from "./components/ChatMessage";
 import { ChatShell } from "./components/ChatShell";
+import { stripSyntheticReasoningStatus } from "./core/reasoningText";
 import {
   SessionSidebar,
   type SessionListItem,
@@ -1479,6 +1481,61 @@ function ArtifactTailDiscardDialog({
 const SESSION_OUTPUT_SCROLL_SETTLE_MS = 900;
 const SESSION_OUTPUT_SCROLL_RETRY_MS = [0, 80, 240, 520];
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 160;
+const THINKING_ACTIVITY_ANIMATION_MS = 220;
+
+function ThinkingActivityPanel({
+  message,
+  isClosing,
+  onClose
+}: {
+  message: ClientMessage;
+  isClosing?: boolean;
+  onClose(): void;
+}) {
+  const reasoning = stripSyntheticReasoningStatus(message.reasoning ?? "").trim();
+  const isStreaming = message.status === "streaming";
+
+  return (
+    <aside
+      className={`thinking-activity-panel ${isClosing ? "is-closing" : ""}`}
+      aria-labelledby="thinking-activity-title"
+    >
+      <header className="thinking-activity-header">
+        <h2 id="thinking-activity-title">Activity</h2>
+        <span className="thinking-activity-header-status">
+          {isStreaming ? "Thinking" : "Complete"}
+        </span>
+        <button
+          className="thinking-activity-close"
+          type="button"
+          aria-label="Close activity"
+          onClick={onClose}
+        >
+          <X size={20} strokeWidth={2} aria-hidden="true" />
+        </button>
+      </header>
+      <div className="thinking-activity-body">
+        <section className="thinking-activity-section">
+          <h3>Thinking</h3>
+          <div className="thinking-activity-step">
+            {isStreaming ? (
+              <LoaderCircle size={16} strokeWidth={2} aria-hidden="true" />
+            ) : (
+              <CheckCircle2 size={16} strokeWidth={2} aria-hidden="true" />
+            )}
+            <div>
+              <strong>{isStreaming ? "Thinking" : "Thought"}</strong>
+              <span>{isStreaming ? "In progress" : "Complete"}</span>
+            </div>
+          </div>
+          {reasoning ? (
+            <pre className="thinking-activity-text">{reasoning}</pre>
+          ) : null}
+        </section>
+      </div>
+    </aside>
+  );
+}
 
 function isNearScrollBottom(viewport: HTMLElement): boolean {
   return (
@@ -1555,6 +1612,7 @@ function StreamThread({
   const isNewChat = useAuiState((state) => state.thread.messages.length === 0);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const shouldFollowBottomRef = useRef(true);
+  const reasoningActivityCloseTimerRef = useRef<number | null>(null);
   const [composerFooterElement, setComposerFooterElement] =
     useState<HTMLDivElement | null>(null);
   const lastAutoScrollTargetRef = useRef<{
@@ -1579,8 +1637,26 @@ function StreamThread({
   const [selectionModeMessageId, setSelectionModeMessageId] = useState<
     string | null
   >(null);
+  const [activeReasoningMessageId, setActiveReasoningMessageId] = useState<
+    string | null
+  >(null);
+  const [isReasoningActivityClosing, setIsReasoningActivityClosing] =
+    useState(false);
   const [artifactTailDiscardIntent, setArtifactTailDiscardIntent] =
     useState<ArtifactTailDiscardIntent | null>(null);
+  const activeReasoningMessage = activeReasoningMessageId
+    ? messageById.get(activeReasoningMessageId)
+    : undefined;
+  const showReasoningActivity =
+    activeReasoningMessage?.role === "assistant" &&
+    (activeReasoningMessage.status === "streaming" ||
+      Boolean(
+        stripSyntheticReasoningStatus(
+          activeReasoningMessage.reasoning ?? ""
+        ).trim()
+      ));
+  const isReasoningActivityOpen =
+    Boolean(showReasoningActivity) && !isReasoningActivityClosing;
   const visibleMessageIds = useMemo(
     () => new Set(messages.map((message) => message.id)),
     [messages]
@@ -1637,11 +1713,48 @@ function StreamThread({
     return byUserId;
   }, [messages]);
 
+  const clearReasoningActivityCloseTimer = useCallback(() => {
+    if (reasoningActivityCloseTimerRef.current !== null) {
+      window.clearTimeout(reasoningActivityCloseTimerRef.current);
+      reasoningActivityCloseTimerRef.current = null;
+    }
+  }, []);
+
+  const openReasoningActivity = useCallback(
+    (messageId: string) => {
+      clearReasoningActivityCloseTimer();
+      setActiveReasoningMessageId(messageId);
+      setIsReasoningActivityClosing(false);
+    },
+    [clearReasoningActivityCloseTimer]
+  );
+
+  const closeReasoningActivity = useCallback(() => {
+    if (!activeReasoningMessageId) {
+      return;
+    }
+
+    clearReasoningActivityCloseTimer();
+    setIsReasoningActivityClosing(true);
+    reasoningActivityCloseTimerRef.current = window.setTimeout(() => {
+      setActiveReasoningMessageId(null);
+      setIsReasoningActivityClosing(false);
+      reasoningActivityCloseTimerRef.current = null;
+    }, THINKING_ACTIVITY_ANIMATION_MS);
+  }, [activeReasoningMessageId, clearReasoningActivityCloseTimer]);
+
+  useEffect(() => {
+    return clearReasoningActivityCloseTimer;
+  }, [clearReasoningActivityCloseTimer]);
+
   useEffect(() => {
     setArtifactSelections([]);
     setSelectionModeMessageId(null);
+    clearReasoningActivityCloseTimer();
+    setActiveReasoningMessageId(null);
+    setIsReasoningActivityClosing(false);
     setArtifactTailDiscardIntent(null);
-  }, [activeSessionId]);
+  }, [activeSessionId, clearReasoningActivityCloseTimer]);
 
   useEffect(() => {
     setArtifactSelections((current) => {
@@ -1661,10 +1774,32 @@ function StreamThread({
         ? current
         : null;
     });
+    setActiveReasoningMessageId((current) => {
+      if (!current || !visibleMessageIds.has(current)) {
+        if (current) {
+          clearReasoningActivityCloseTimer();
+          setIsReasoningActivityClosing(false);
+        }
+        return null;
+      }
+
+      const activeMessage = messages.find((message) => message.id === current);
+      const canShow = Boolean(
+        activeMessage?.role === "assistant" &&
+        (activeMessage.status === "streaming" ||
+          stripSyntheticReasoningStatus(activeMessage.reasoning ?? "").trim())
+      );
+      if (!canShow) {
+        clearReasoningActivityCloseTimer();
+        setIsReasoningActivityClosing(false);
+        return null;
+      }
+      return current;
+    });
     setArtifactTailDiscardIntent((current) =>
       current && visibleMessageIds.has(current.messageId) ? current : null
     );
-  }, [messages, visibleMessageIds]);
+  }, [clearReasoningActivityCloseTimer, messages, visibleMessageIds]);
 
   const addArtifactSelection = useCallback(
     (messageId: string, selection: ArtifactSelectionPayload) => {
@@ -1987,7 +2122,11 @@ function StreamThread({
 
   return (
     <ThreadPrimitive.Root
-      className={`thread-root ${isNewChat ? "is-new" : "has-messages"}`}
+      className={`thread-root ${isNewChat ? "is-new" : "has-messages"} ${
+        showReasoningActivity ? "has-thinking-activity" : ""
+      } ${
+        isReasoningActivityOpen ? "is-thinking-activity-open" : ""
+      }`}
     >
       <ThreadPrimitive.Viewport
         ref={viewportRef}
@@ -2038,12 +2177,14 @@ function StreamThread({
                   }
                   branchInfo={branchInfo}
                   artifactEditVariantInfo={artifactEditVariantInfo}
+                  activeReasoningMessageId={activeReasoningMessageId ?? undefined}
                   onRuntimeError={onRuntimeError}
                   onArtifactAction={onArtifactAction}
                   onArtifactSelection={handleArtifactSelection}
                   onArtifactSelectionModeChange={
                     handleArtifactSelectionModeChange
                   }
+                  onOpenReasoningActivity={openReasoningActivity}
                   onVisualRepair={onVisualRepairAssistant}
                   onRegenerate={onRegenerateAssistant}
                   onSelectBranch={onSelectBranch}
@@ -2090,6 +2231,13 @@ function StreamThread({
           />
         </ThreadPrimitive.ViewportFooter>
       </ThreadPrimitive.Viewport>
+      {showReasoningActivity && activeReasoningMessage ? (
+        <ThinkingActivityPanel
+          message={activeReasoningMessage}
+          isClosing={isReasoningActivityClosing}
+          onClose={closeReasoningActivity}
+        />
+      ) : null}
       {artifactTailDiscardIntent ? (
         <ArtifactTailDiscardDialog
           intent={artifactTailDiscardIntent}
