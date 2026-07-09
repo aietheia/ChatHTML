@@ -143,6 +143,23 @@ describe("openrouter response stream helpers", () => {
     assert.equal(result.applied[0].occurrence, 1);
   });
 
+  it("replaces the streamui block for broad artifact edits", () => {
+    const source =
+      "<chat><assistant>Old note</assistant></chat><streamui><section>Old</section></streamui>";
+    const result = applyArtifactSourceEdits(source, [
+      {
+        target: "streamui",
+        replace: "<streamui><section>New</section></streamui>"
+      }
+    ]);
+
+    assert.equal(
+      result.rawStream,
+      "<chat><assistant>Old note</assistant></chat><streamui><section>New</section></streamui>"
+    );
+    assert.equal(result.applied[0].findLength, "<streamui><section>Old</section></streamui>".length);
+  });
+
   it("rejects ambiguous artifact source edits", () => {
     assert.throws(
       () =>

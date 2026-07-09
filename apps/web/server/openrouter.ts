@@ -145,6 +145,24 @@ type ToolStreamState = {
   reasoningEvents: number;
 };
 
+type ResponsesTerminalFailure = {
+  message: string;
+  status?: string;
+  incompleteReason?: string;
+};
+
+class ResponsesTerminalFailureError extends Error {
+  readonly status?: string;
+  readonly incompleteReason?: string;
+
+  constructor(failure: ResponsesTerminalFailure) {
+    super(failure.message);
+    this.name = "ResponsesTerminalFailureError";
+    this.status = failure.status;
+    this.incompleteReason = failure.incompleteReason;
+  }
+}
+
 type ResponsesToolExecutionResult = {
   output: ResponsesToolOutput;
   followUpInput?: ResponsesInputItem[];
@@ -183,7 +201,8 @@ type ArtifactEditRequestBody = {
 };
 
 type ArtifactSourceEdit = {
-  find: string;
+  find?: string;
+  target?: "streamui";
   replace: string;
   occurrence?: number;
   note?: string;
@@ -228,6 +247,8 @@ const chatRuns = new Map<string, ChatRun>();
 const CHAT_RUN_TTL_MS = 10 * 60 * 1000;
 const STREAM_PERSIST_INTERVAL_MS = 500;
 const CHAT_CANCELLED_MESSAGE = "Generation stopped.";
+const RESPONSES_MAX_OUTPUT_TOKENS = 16_000;
+const ARTIFACT_EDIT_MAX_OUTPUT_TOKENS = 32_000;
 
 function flushResponse(res: Response): void {
   const flush = (res as Response & { flush?: () => void }).flush;
@@ -937,7 +958,18 @@ async function executeChatRun(run: ChatRun): Promise<void> {
 
     const message =
       error instanceof Error ? error.message : "Unknown chat proxy error.";
-    console.error(`[chat:${run.input.requestId}] error ${message}`);
+    const responsesFailure =
+      error instanceof ResponsesTerminalFailureError ? error : null;
+    const stats = [
+      `[chat:${run.input.requestId}] error ${message}`,
+      responsesFailure?.status
+        ? `responses_status=${responsesFailure.status}`
+        : "",
+      responsesFailure?.status === "incomplete"
+        ? `incomplete_reason=${responsesFailure.incompleteReason || "unknown"}`
+        : ""
+    ].filter(Boolean);
+    console.error(stats.join(" "));
     finishChatRun(run, "error", message);
   }
 }
@@ -1567,26 +1599,87 @@ function responsesErrorMessage(input: unknown): string {
   return parts.join(": ");
 }
 
-function getResponsesTerminalError(event: Record<string, unknown>): string {
-  const directError = responsesErrorMessage(event.error);
-  if (directError) {
-    return directError;
+function getResponsesEventStatus(
+  event: Record<string, unknown>,
+  response: Record<string, unknown>
+): string {
+  const responseStatus =
+    typeof response.status === "string" ? response.status.trim() : "";
+  if (responseStatus) {
+    return responseStatus;
   }
 
+  const eventType = typeof event.type === "string" ? event.type : "";
+  if (eventType === "response.failed") {
+    return "failed";
+  }
+  if (eventType === "response.cancelled") {
+    return "cancelled";
+  }
+  if (eventType === "response.incomplete") {
+    return "incomplete";
+  }
+  return "";
+}
+
+function responsesIncompleteReason(input: unknown): string {
+  if (!input || typeof input !== "object") {
+    return "";
+  }
+
+  const details = input as { reason?: unknown; error?: unknown };
+  const reason = stringValue(details.reason, 160);
+  if (reason) {
+    return reason;
+  }
+  if (details.error && typeof details.error === "object") {
+    return responsesIncompleteReason(details.error);
+  }
+  return "";
+}
+
+function getResponsesTerminalFailure(
+  event: Record<string, unknown>
+): ResponsesTerminalFailure | undefined {
   const response =
     event.response && typeof event.response === "object"
       ? (event.response as Record<string, unknown>)
       : event;
-  const status = typeof response.status === "string" ? response.status : "";
-  const incomplete = responsesErrorMessage(response.incomplete_details);
-  if (status === "failed" || status === "cancelled" || status === "incomplete") {
-    return (
-      incomplete ||
-      `Responses API returned ${status || "an incomplete response"}.`
-    );
+  const status = getResponsesEventStatus(event, response);
+  const incompleteDetails = response.incomplete_details ?? event.incomplete_details;
+  const incompleteReason = responsesIncompleteReason(incompleteDetails);
+
+  if (status === "incomplete") {
+    return {
+      message: "Responses API returned incomplete.",
+      status,
+      incompleteReason
+    };
   }
 
-  return incomplete;
+  const directError = responsesErrorMessage(event.error);
+  if (directError) {
+    return { message: directError, status, incompleteReason };
+  }
+
+  const incomplete = responsesErrorMessage(incompleteDetails);
+  if (status === "failed" || status === "cancelled" || status === "incomplete") {
+    return {
+      message:
+        incomplete ||
+        `Responses API returned ${status || "an incomplete response"}.`,
+      status,
+      incompleteReason
+    };
+  }
+
+  return incomplete
+    ? {
+        message: incomplete,
+        status,
+        incompleteReason
+      }
+    : undefined;
 }
 
 async function streamResponsesOnce({
@@ -1598,7 +1691,8 @@ async function streamResponsesOnce({
   emit,
   state,
   signal,
-  useOpenRouterReasoning
+  useOpenRouterReasoning,
+  maxOutputTokens = RESPONSES_MAX_OUTPUT_TOKENS
 }: {
   endpoint: string;
   apiSettings: RuntimeApiSettings;
@@ -1609,6 +1703,7 @@ async function streamResponsesOnce({
   state: ToolStreamState;
   signal: AbortSignal;
   useOpenRouterReasoning: boolean;
+  maxOutputTokens?: number;
 }): Promise<ResponsesFunctionCallItem[]> {
   throwIfAborted(signal);
 
@@ -1617,7 +1712,7 @@ async function streamResponsesOnce({
     input,
     instructions,
     stream: true,
-    max_output_tokens: 9000
+    max_output_tokens: maxOutputTokens
   };
   if (tools.length) {
     body.tools = tools;
@@ -1655,7 +1750,7 @@ async function streamResponsesOnce({
   const textDeltaCharsByKey = new Map<string, number>();
   const reasoningDeltaCharsByKey = new Map<string, number>();
   const contentCharsAtStart = state.contentChars;
-  let terminalError = "";
+  let terminalFailure: ResponsesTerminalFailure | undefined;
   let buffer = "";
 
   const writeContent = (text: string, key: string) => {
@@ -1746,7 +1841,7 @@ async function streamResponsesOnce({
       type === "response.incomplete" ||
       type === "response.cancelled"
     ) {
-      terminalError = getResponsesTerminalError(data);
+      terminalFailure = getResponsesTerminalFailure(data);
       return;
     }
 
@@ -1785,7 +1880,7 @@ async function streamResponsesOnce({
     }
 
     if (type === "response.done" && data.response && typeof data.response === "object") {
-      terminalError = terminalError || getResponsesTerminalError(data);
+      terminalFailure = terminalFailure ?? getResponsesTerminalFailure(data);
       appendFunctionCallsFromOutput(
         (data.response as { output?: unknown }).output,
         calls
@@ -1840,8 +1935,8 @@ async function streamResponsesOnce({
     buffer.split(/\r?\n/).forEach(flushLine);
   }
 
-  if (terminalError) {
-    throw new Error(terminalError);
+  if (terminalFailure) {
+    throw new ResponsesTerminalFailureError(terminalFailure);
   }
 
   return Array.from(calls.values());
@@ -1921,7 +2016,9 @@ function normalizeArtifactSourceEdits(input: unknown): ArtifactSourceEdit[] {
     }
 
     const edit = item as Partial<ArtifactSourceEdit>;
-    if (typeof edit.find !== "string" || typeof edit.replace !== "string") {
+    const target = edit.target === "streamui" ? edit.target : undefined;
+    const find = typeof edit.find === "string" ? edit.find : "";
+    if (typeof edit.replace !== "string" || (!find && target !== "streamui")) {
       continue;
     }
 
@@ -1930,7 +2027,8 @@ function normalizeArtifactSourceEdits(input: unknown): ArtifactSourceEdit[] {
         ? Math.max(1, Math.round(edit.occurrence))
         : undefined;
     edits.push({
-      find: edit.find,
+      ...(find ? { find } : {}),
+      ...(target ? { target } : {}),
       replace: edit.replace,
       occurrence,
       note: stringValue(edit.note, 240) || undefined
@@ -1984,6 +2082,14 @@ function findOccurrenceIndex(
   return -1;
 }
 
+function findStreamUiBlockRange(source: string): { start: number; end: number } | null {
+  const match = /<streamui\b[^>]*>[\s\S]*?<\/streamui>/i.exec(source);
+  if (!match || match.index === undefined) {
+    return null;
+  }
+  return { start: match.index, end: match.index + match[0].length };
+}
+
 export function applyArtifactSourceEdits(
   source: string,
   edits: ArtifactSourceEdit[]
@@ -2009,14 +2115,39 @@ export function applyArtifactSourceEdits(
   }> = [];
 
   edits.forEach((edit, index) => {
-    if (!edit.find) {
+    if (edit.target === "streamui") {
+      const range = findStreamUiBlockRange(current);
+      if (!range) {
+        throw new Error(`Edit ${index + 1} could not find the streamui artifact block.`);
+      }
+      if (!/<streamui\b/i.test(edit.replace) || !/<\/streamui>/i.test(edit.replace)) {
+        throw new Error(`Edit ${index + 1} replacement must include a streamui artifact block.`);
+      }
+      const existing = current.slice(range.start, range.end);
+      if (existing === edit.replace) {
+        throw new Error(`Edit ${index + 1} does not change the source.`);
+      }
+      current =
+        current.slice(0, range.start) +
+        edit.replace +
+        current.slice(range.end);
+      applied.push({
+        note: edit.note,
+        findLength: existing.length,
+        replaceLength: edit.replace.length
+      });
+      return;
+    }
+
+    const find = edit.find ?? "";
+    if (!find) {
       throw new Error(`Edit ${index + 1} has an empty find string.`);
     }
-    if (edit.find === edit.replace) {
+    if (find === edit.replace) {
       throw new Error(`Edit ${index + 1} does not change the source.`);
     }
 
-    const matches = countOccurrences(current, edit.find);
+    const matches = countOccurrences(current, find);
     if (matches === 0) {
       throw new Error(`Edit ${index + 1} did not match the current source.`);
     }
@@ -2036,7 +2167,7 @@ export function applyArtifactSourceEdits(
       );
     }
 
-    const start = findOccurrenceIndex(current, edit.find, occurrence);
+    const start = findOccurrenceIndex(current, find, occurrence);
     if (start < 0) {
       throw new Error(`Edit ${index + 1} could not be applied.`);
     }
@@ -2044,11 +2175,11 @@ export function applyArtifactSourceEdits(
     current =
       current.slice(0, start) +
       edit.replace +
-      current.slice(start + edit.find.length);
+      current.slice(start + find.length);
     applied.push({
       note: edit.note,
       occurrence: edit.occurrence && edit.occurrence > matches ? occurrence : edit.occurrence,
-      findLength: edit.find.length,
+      findLength: find.length,
       replaceLength: edit.replace.length
     });
   });
@@ -2067,16 +2198,20 @@ function buildArtifactEditInstructions(): string {
   return `You edit existing ChatHTML artifact source with precise patches.
 
 Return only JSON with this exact shape:
-{"summary":"short change summary","edits":[{"find":"exact source substring","replace":"replacement substring","occurrence":1,"note":"optional"}]}
+{"summary":"short change summary","edits":[{"find":"exact source substring","replace":"replacement substring","occurrence":1,"note":"optional"},{"target":"streamui","replace":"<streamui>complete replacement artifact block</streamui>","note":"optional"}]}
 
 Rules:
 - Apply the user's request by editing ORIGINAL_SOURCE, not by regenerating the whole artifact.
 - Every find value must be an exact contiguous substring from ORIGINAL_SOURCE or from the source after earlier edits.
 - Keep edits small and targeted. Use multiple edits when that is clearer.
+- The user's prompt decides the edit scope. Selected references are anchors for intent and disambiguation, not boundaries.
+- Do not limit changes to selected elements/text unless the user explicitly asks to change only the selection.
+- For broad requests such as "change the whole page" or "make the entire artifact about X", prefer one {"target":"streamui","replace":"..."} edit containing the complete replacement <streamui>...</streamui> block.
+- Use exact find/replace edits for small or localized changes.
 - If a find substring appears more than once, include a 1-based occurrence number.
 - Preserve valid ChatHTML protocol tags, especially <chat> and <streamui>.
 - Use selected references as anchors. DOM html/text may differ from source after parsing, so match against ORIGINAL_SOURCE carefully.
-- Do not include markdown, comments outside JSON, or a full rewritten artifact.`;
+- Do not include markdown or comments outside JSON. A full rewritten artifact is allowed only inside edits[].replace when target is "streamui".`;
 }
 
 async function runArtifactEditModel({
@@ -2137,7 +2272,8 @@ async function runArtifactEditModel({
     },
     state,
     signal,
-    useOpenRouterReasoning: isOpenRouterRuntime(apiSettings)
+    useOpenRouterReasoning: false,
+    maxOutputTokens: ARTIFACT_EDIT_MAX_OUTPUT_TOKENS
   });
 
   const parsed = safeJsonParse(extractJsonObjectText(rawModelText));
@@ -2220,9 +2356,20 @@ export async function handleArtifactEdit(
     completed = true;
     const message =
       error instanceof Error ? error.message : "The artifact edit failed.";
-    console.error(`[artifact-edit:${requestId}] error ${message}`);
+    const responsesFailure =
+      error instanceof ResponsesTerminalFailureError ? error : null;
+    const stats = [
+      `[artifact-edit:${requestId}] error ${message}`,
+      responsesFailure?.status
+        ? `responses_status=${responsesFailure.status}`
+        : "",
+      responsesFailure?.status === "incomplete"
+        ? `incomplete_reason=${responsesFailure.incompleteReason || "unknown"}`
+        : ""
+    ].filter(Boolean);
+    console.error(stats.join(" "));
     if (!res.headersSent) {
-      res.status(500).json({ error: message });
+      res.status(responsesFailure ? 502 : 500).json({ error: message });
     }
   }
 }
