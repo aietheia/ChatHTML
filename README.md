@@ -81,6 +81,35 @@ npm --workspace @chathtml/web run dev
 npm --workspace @chathtml/web run build
 ```
 
+## Bug Reports and GitHub Issues
+
+The in-app bug report dialog posts to `POST /api/bug-reports`. The backend stores
+each report under `sessions/bug-reports/YYYY-MM-DD/<report-id>/` with
+`report.json`, any attached images, and a `github.json` sync record when GitHub
+issue sync is configured.
+
+When `GITHUB_REPOSITORY` and `GITHUB_ISSUES_TOKEN` are set, each submitted bug
+report creates a GitHub issue. Attached images are not uploaded to GitHub; the
+issue embeds ChatHTML image URLs with a per-report random access token. Use a
+private issue repo if reports or screenshots may contain sensitive data.
+
+Useful `.env` controls:
+
+```bash
+GITHUB_REPOSITORY=aietheia/ChatHTML
+GITHUB_ISSUES_TOKEN=
+GITHUB_BOT_TOKEN=
+GITHUB_ISSUE_LABELS=bug,user-report,ai-fix-candidate
+GITHUB_ISSUE_ASSIGNEES=
+CHATHTML_BUG_REPORT_PUBLIC_BASE_URL=https://chat.aietheia.com
+CHATHTML_BUG_REPORT_DIR=
+```
+
+`GITHUB_BOT_TOKEN` is accepted as a fallback for issue creation, but production
+should prefer a narrower `GITHUB_ISSUES_TOKEN` for the website and reserve the
+bot token for a separate repair runner that can push branches and open pull
+requests.
+
 ## Retrieval and External Resources
 
 ChatHTML exposes a native `retrieve` tool to the model in the main Responses API call. The Responses function-call loop handles tool calls and tool results, so there is no separate planner pass or keyword router. The retrieval tool can:

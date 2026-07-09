@@ -1,0 +1,54 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  buildGitHubIssueBody,
+  buildGitHubIssueTitle,
+  parseCommaSeparatedList,
+  parseGitHubRepositorySlug
+} from "../../server/githubIssues.js";
+
+test("parses GitHub issue configuration helpers", () => {
+  assert.deepEqual(parseCommaSeparatedList(" bug, user-report ,, ai "), [
+    "bug",
+    "user-report",
+    "ai"
+  ]);
+  assert.equal(
+    parseGitHubRepositorySlug("https://github.com/aietheia/ChatHTML.git"),
+    "aietheia/ChatHTML"
+  );
+  assert.equal(parseGitHubRepositorySlug("aietheia/ChatHTML"), "aietheia/ChatHTML");
+  assert.equal(parseGitHubRepositorySlug("not-a-repo"), undefined);
+});
+
+test("builds a GitHub issue title and body for a bug report", () => {
+  const report = {
+    id: "bug-test-123",
+    submittedAt: "2026-07-09T12:00:00.000Z",
+    sessionId: "session-1",
+    sessionTitle: "Broken preview",
+    pageUrl: "https://chat.aietheia.com/",
+    userAgent: "Test Browser",
+    viewport: { width: 1280, height: 720 },
+    remoteAddress: "127.0.0.1",
+    text: "The preview crashes.\n```html\n<div>\n```",
+    images: [
+      {
+        name: "screenshot.png",
+        url: "https://chat.aietheia.com/api/bug-reports/2026-07-09/bug-test-123/images/01-screenshot.png?token=secret",
+        width: 1280,
+        height: 720,
+        size: 42_000
+      }
+    ]
+  };
+
+  assert.equal(buildGitHubIssueTitle(report), "[Bug Report] Broken preview");
+
+  const body = buildGitHubIssueBody(report);
+  assert.match(body, /untrusted input/);
+  assert.match(body, /````/);
+  assert.match(body, /!\[screenshot\.png\]\(https:\/\/chat\.aietheia\.com/);
+  assert.match(body, /Report ID/);
+  assert.match(body, /Fixes #<issue-number>/);
+});

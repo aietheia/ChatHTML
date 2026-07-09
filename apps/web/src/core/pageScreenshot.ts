@@ -53,6 +53,32 @@ function createCaptureArea(
   return new FrameDomRect(x, y, width, height);
 }
 
+function measureDocument(document: Document) {
+  const body = document.body;
+  const html = document.documentElement;
+  const width = Math.ceil(
+    Math.max(
+      body?.scrollWidth || 0,
+      body?.offsetWidth || 0,
+      html?.scrollWidth || 0,
+      html?.offsetWidth || 0
+    )
+  );
+  const height = Math.ceil(
+    Math.max(
+      body?.scrollHeight || 0,
+      body?.offsetHeight || 0,
+      html?.scrollHeight || 0,
+      html?.offsetHeight || 0
+    )
+  );
+
+  return {
+    width: Math.max(1, width),
+    height: Math.max(1, height)
+  };
+}
+
 function getScreenshotScale(width: number, height: number): number {
   const deviceScale = Math.min(window.devicePixelRatio || 1, 2);
   const dimensionScale = Math.min(
@@ -65,6 +91,27 @@ function getScreenshotScale(width: number, height: number): number {
 
 function serializeSvgDocument(svgDocument: XMLDocument): string {
   return new XMLSerializer().serializeToString(svgDocument.documentElement);
+}
+
+function normalizeSvgMarkup(markup: string): string {
+  return markup.startsWith("<?xml")
+    ? markup
+    : `<?xml version="1.0" encoding="UTF-8"?>${markup}`;
+}
+
+function collectDocumentStyles(document: Document): string {
+  return Array.from(document.styleSheets)
+    .map((sheet) => {
+      try {
+        return Array.from(sheet.cssRules)
+          .map((rule) => rule.cssText)
+          .join("\n");
+      } catch {
+        return "";
+      }
+    })
+    .filter(Boolean)
+    .join("\n");
 }
 
 async function inlineSvgResourcesBestEffort(svgDocument: XMLDocument): Promise<void> {
@@ -91,6 +138,32 @@ async function renderElementToSvgString(
   return serializeSvgDocument(svgDocument);
 }
 
+function renderDocumentAreaToForeignObjectSvg(
+  document: Document,
+  x: number,
+  y: number,
+  width: number,
+  height: number
+): string {
+  const measured = measureDocument(document);
+  const clonedBody = document.body.cloneNode(true) as HTMLElement;
+  const style = document.createElement("style");
+  style.textContent = collectDocumentStyles(document);
+  clonedBody.querySelectorAll("script").forEach((script) => script.remove());
+  clonedBody.prepend(style);
+  clonedBody.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+  clonedBody.style.margin = "0";
+  clonedBody.style.width = `${measured.width}px`;
+  clonedBody.style.minHeight = `${measured.height}px`;
+  clonedBody.style.transform = `translate(${-x}px, ${-y}px)`;
+  clonedBody.style.transformOrigin = "0 0";
+
+  const bodyMarkup = new XMLSerializer().serializeToString(clonedBody);
+  return normalizeSvgMarkup(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject x="0" y="0" width="${width}" height="${height}">${bodyMarkup}</foreignObject></svg>`
+  );
+}
+
 function loadImageFromUrl(url: string): Promise<HTMLImageElement> {
   const image = new Image();
   return withTimeout(
@@ -106,6 +179,35 @@ function loadImageFromUrl(url: string): Promise<HTMLImageElement> {
     }),
     SCREENSHOT_TIMEOUT_MS,
     "Timed out while loading the screenshot SVG."
+  );
+}
+
+async function waitForImageElementReady(image: HTMLImageElement): Promise<void> {
+  if (image.complete && image.naturalWidth > 0) {
+    await settleWithin(image.decode?.(), 1_000);
+    return;
+  }
+
+  await withTimeout(
+    new Promise<void>((resolve, reject) => {
+      image.addEventListener("load", () => resolve(), { once: true });
+      image.addEventListener(
+        "error",
+        () => reject(new Error("Could not load the iframe overlay image.")),
+        { once: true }
+      );
+    }),
+    SCREENSHOT_TIMEOUT_MS,
+    "Timed out while loading the iframe overlay image."
+  );
+  await settleWithin(image.decode?.(), 1_000);
+}
+
+async function waitForDocumentImages(document: Document): Promise<void> {
+  await Promise.all(
+    Array.from(document.images).map((image) =>
+      waitForImageElementReady(image).catch(() => undefined)
+    )
   );
 }
 
@@ -159,8 +261,13 @@ async function renderDocumentAreaToDataUrl(
   width: number,
   height: number
 ): Promise<string> {
-  const captureArea = createCaptureArea(document, x, y, width, height);
-  const svg = await renderElementToSvgString(document.documentElement, captureArea);
+  const svg = renderDocumentAreaToForeignObjectSvg(
+    document,
+    x,
+    y,
+    width,
+    height
+  );
   const scale = getScreenshotScale(width, height);
   const blob = await rasterizeSvgToPngBlob(svg, width, height, scale);
 
@@ -212,6 +319,9 @@ async function createIframeOverlay(iframe: HTMLIFrameElement): Promise<IframeOve
   const visibleHeight = Math.max(1, Math.round(visibleBottom - visibleTop));
   const frameX = Math.max(0, visibleLeft - rect.left) + frameWindow.scrollX;
   const frameY = Math.max(0, visibleTop - rect.top) + frameWindow.scrollY;
+  await settleWithin(frameDocument.fonts?.ready, 2_000);
+  await settleWithin(waitForDocumentImages(frameDocument), 2_000);
+
   const dataUrl = await renderDocumentAreaToDataUrl(
     frameDocument,
     frameX,
@@ -221,7 +331,6 @@ async function createIframeOverlay(iframe: HTMLIFrameElement): Promise<IframeOve
   );
 
   const overlay = document.createElement("img");
-  overlay.src = dataUrl;
   overlay.alt = "";
   overlay.setAttribute("aria-hidden", "true");
   overlay.style.position = "fixed";
@@ -240,6 +349,8 @@ async function createIframeOverlay(iframe: HTMLIFrameElement): Promise<IframeOve
   const previousVisibility = iframe.style.visibility;
   iframe.style.visibility = "hidden";
   document.body.appendChild(overlay);
+  overlay.src = dataUrl;
+  await waitForImageElementReady(overlay);
 
   return {
     cleanup() {

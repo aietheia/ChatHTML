@@ -5,7 +5,10 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { handleModelsRequest } from "./models.js";
-import { handleCreateBugReport } from "./bugReports.js";
+import {
+  handleBugReportImageRequest,
+  handleCreateBugReport
+} from "./bugReports.js";
 import {
   getOpenRouterActivitySnapshot,
   handleArtifactEdit,
@@ -131,6 +134,10 @@ app.post("/api/chat/runs/:runId/cancel", handleCancelChatRun);
 app.post("/api/artifact-edits", handleArtifactEdit);
 app.post("/api/models", handleModelsRequest);
 app.post("/api/bug-reports", handleCreateBugReport);
+app.get(
+  "/api/bug-reports/:date/:reportId/images/:fileName",
+  handleBugReportImageRequest
+);
 app.post("/api/retrieve", handleRetrievalRequest);
 app.get("/api/export-resource", handleExportResourceRequest);
 app.get("/api/settings", handleGetRuntimeSettings);

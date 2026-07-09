@@ -1,9 +1,16 @@
 import type { Request, Response } from "express";
 import "./env.js";
-import { createHash, randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  createGitHubIssueForBugReport,
+  getGitHubIssueConfig,
+  type BugReportIssueImage,
+  type BugReportIssueInput,
+  type CreatedGitHubIssue
+} from "./githubIssues.js";
 
 const MAX_BUG_REPORT_IMAGES = 8;
 const MAX_BUG_REPORT_TEXT_LENGTH = 12_000;
@@ -51,10 +58,48 @@ type StoredBugReportImage = {
   sha256: string;
 };
 
+type StoredBugReport = {
+  id: string;
+  submittedAt: string;
+  imageAccessToken: string;
+  sessionId?: string;
+  sessionTitle?: string;
+  clientId?: string;
+  pageUrl?: string;
+  userAgent?: string;
+  viewport?: unknown;
+  remoteAddress?: string;
+  text: string;
+  images: StoredBugReportImage[];
+};
+
 type PreparedBugReportImage = {
   metadata: StoredBugReportImage;
   buffer: Buffer;
 };
+
+type GitHubIssueSyncRecord =
+  | {
+      ok: true;
+      skipped?: false;
+      syncedAt: string;
+      repository: string;
+      number: number;
+      url: string;
+      apiUrl: string;
+    }
+  | {
+      ok: false;
+      skipped: true;
+      syncedAt: string;
+      reason: string;
+    }
+  | {
+      ok: false;
+      skipped?: false;
+      syncedAt: string;
+      error: string;
+    };
 
 function stringValue(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
@@ -106,8 +151,23 @@ function createReportId(): string {
   return `bug-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
 }
 
-function getReportDirectory(reportId: string): string {
-  const dateSegment = new Date().toISOString().slice(0, 10);
+function createImageAccessToken(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+function getTodayDateSegment(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function assertDateSegment(value: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new Error("Invalid bug report date.");
+  }
+  return value;
+}
+
+function getReportDirectory(dateSegment: string, reportId: string): string {
+  assertDateSegment(dateSegment);
   const resolved = path.resolve(
     bugReportsDir,
     dateSegment,
@@ -117,6 +177,198 @@ function getReportDirectory(reportId: string): string {
     throw new Error("Invalid bug report path.");
   }
   return resolved;
+}
+
+function safeTokenEquals(actual: string, expected: string): boolean {
+  const actualBuffer = Buffer.from(actual);
+  const expectedBuffer = Buffer.from(expected);
+  return (
+    actualBuffer.byteLength === expectedBuffer.byteLength &&
+    timingSafeEqual(actualBuffer, expectedBuffer)
+  );
+}
+
+function singleQueryValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value) && typeof value[0] === "string") {
+    return value[0];
+  }
+  return "";
+}
+
+function envString(...names: string[]): string {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+  return "";
+}
+
+function normalizeBaseUrl(value: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return undefined;
+    }
+    url.pathname = url.pathname.replace(/\/+$/, "");
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return undefined;
+  }
+}
+
+function getBugReportPublicBaseUrl(req: Request): string | undefined {
+  const configured = normalizeBaseUrl(
+    envString(
+      "CHATHTML_BUG_REPORT_PUBLIC_BASE_URL",
+      "CHATHTML_PUBLIC_BASE_URL",
+      "PUBLIC_BASE_URL"
+    )
+  );
+  if (configured) {
+    return configured;
+  }
+
+  const host =
+    req.get("x-forwarded-host")?.split(",")[0]?.trim() ||
+    req.get("host")?.trim();
+  if (!host) {
+    return undefined;
+  }
+  const forwardedProto = req.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const isLocalHost =
+    host.startsWith("localhost") ||
+    host.startsWith("127.0.0.1") ||
+    host.startsWith("[::1]");
+  const protocol = forwardedProto || (isLocalHost ? req.protocol : "https");
+  return normalizeBaseUrl(`${protocol}://${host}`);
+}
+
+function buildBugReportImageUrl(
+  req: Request,
+  dateSegment: string,
+  report: StoredBugReport,
+  image: StoredBugReportImage
+): string | undefined {
+  const baseUrl = getBugReportPublicBaseUrl(req);
+  if (!baseUrl) {
+    return undefined;
+  }
+
+  const url = new URL(
+    `/api/bug-reports/${encodeURIComponent(dateSegment)}/${encodeURIComponent(
+      report.id
+    )}/images/${encodeURIComponent(image.fileName)}`,
+    baseUrl
+  );
+  url.searchParams.set("token", report.imageAccessToken);
+  return url.toString();
+}
+
+function createBugReportIssueInput(
+  req: Request,
+  dateSegment: string,
+  report: StoredBugReport
+): BugReportIssueInput {
+  const images: BugReportIssueImage[] = [];
+  for (const image of report.images) {
+    const url = buildBugReportImageUrl(req, dateSegment, report, image);
+    if (!url) {
+      continue;
+    }
+    images.push({
+      name: image.name,
+      url,
+      width: image.width,
+      height: image.height,
+      size: image.size
+    });
+  }
+
+  return {
+    id: report.id,
+    submittedAt: report.submittedAt,
+    sessionId: report.sessionId,
+    sessionTitle: report.sessionTitle,
+    clientId: report.clientId,
+    pageUrl: report.pageUrl,
+    userAgent: report.userAgent,
+    viewport: report.viewport,
+    remoteAddress: report.remoteAddress,
+    text: report.text,
+    images
+  };
+}
+
+function sanitizeGitHubError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.slice(0, 1_000);
+}
+
+async function writeGitHubIssueSyncRecord(
+  reportDir: string,
+  record: GitHubIssueSyncRecord
+): Promise<void> {
+  await writeFile(
+    path.join(reportDir, "github.json"),
+    `${JSON.stringify(record, null, 2)}\n`,
+    { mode: 0o600 }
+  );
+}
+
+async function syncBugReportToGitHubIssue(
+  req: Request,
+  reportDir: string,
+  dateSegment: string,
+  report: StoredBugReport
+): Promise<GitHubIssueSyncRecord> {
+  const config = getGitHubIssueConfig();
+  if (!config) {
+    const record: GitHubIssueSyncRecord = {
+      ok: false,
+      skipped: true,
+      syncedAt: new Date().toISOString(),
+      reason:
+        "GitHub issue sync is not configured. Set GITHUB_REPOSITORY and GITHUB_ISSUES_TOKEN."
+    };
+    await writeGitHubIssueSyncRecord(reportDir, record);
+    return record;
+  }
+
+  try {
+    const issue: CreatedGitHubIssue = await createGitHubIssueForBugReport(
+      config,
+      createBugReportIssueInput(req, dateSegment, report)
+    );
+    const record: GitHubIssueSyncRecord = {
+      ok: true,
+      syncedAt: new Date().toISOString(),
+      repository: config.repository,
+      number: issue.number,
+      url: issue.url,
+      apiUrl: issue.apiUrl
+    };
+    await writeGitHubIssueSyncRecord(reportDir, record);
+    return record;
+  } catch (error) {
+    const record: GitHubIssueSyncRecord = {
+      ok: false,
+      syncedAt: new Date().toISOString(),
+      error: sanitizeGitHubError(error)
+    };
+    await writeGitHubIssueSyncRecord(reportDir, record);
+    console.warn(`[bug-report] GitHub issue sync failed: ${record.error}`);
+    return record;
+  }
 }
 
 function prepareBugReportImage(
@@ -190,8 +442,9 @@ export async function handleCreateBugReport(
       return;
     }
 
+    const dateSegment = getTodayDateSegment();
     const reportId = createReportId();
-    const reportDir = getReportDirectory(reportId);
+    const reportDir = getReportDirectory(dateSegment, reportId);
     await mkdir(reportDir, { recursive: true, mode: 0o700 });
 
     for (const image of images) {
@@ -201,9 +454,10 @@ export async function handleCreateBugReport(
     }
 
     const submittedAt = new Date().toISOString();
-    const report = {
+    const report: StoredBugReport = {
       id: reportId,
       submittedAt,
+      imageAccessToken: createImageAccessToken(),
       sessionId: stringValue(body.sessionId).trim().slice(0, 180) || undefined,
       sessionTitle:
         stringValue(body.sessionTitle).trim().slice(0, 240) || undefined,
@@ -225,13 +479,147 @@ export async function handleCreateBugReport(
       { mode: 0o600 }
     );
 
-    console.info(
-      `[bug-report] stored id=${reportId} session=${report.sessionId ?? "unknown"} images=${images.length}`
+    const github = await syncBugReportToGitHubIssue(
+      req,
+      reportDir,
+      dateSegment,
+      report
     );
-    res.json({ ok: true, id: reportId });
+
+    console.info(
+      `[bug-report] stored id=${reportId} session=${report.sessionId ?? "unknown"} images=${images.length} github=${github.ok ? `#${github.number}` : github.skipped ? "skipped" : "failed"}`
+    );
+    res.json({
+      ok: true,
+      id: reportId,
+      github:
+        github.ok
+          ? {
+              ok: true,
+              issueNumber: github.number,
+              issueUrl: github.url
+            }
+          : {
+              ok: false,
+              skipped: Boolean(github.skipped)
+            }
+    });
   } catch (error) {
     res.status(400).json({
       error: error instanceof Error ? error.message : String(error)
     });
+  }
+}
+
+function isStoredBugReportImage(value: unknown): value is StoredBugReportImage {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const image = value as Partial<StoredBugReportImage>;
+  return (
+    typeof image.name === "string" &&
+    typeof image.mimeType === "string" &&
+    typeof image.fileName === "string" &&
+    typeof image.size === "number"
+  );
+}
+
+function parseStoredBugReport(value: unknown): StoredBugReport | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const report = value as Partial<StoredBugReport>;
+  const images = Array.isArray(report.images)
+    ? report.images.filter(isStoredBugReportImage)
+    : [];
+  if (
+    typeof report.id !== "string" ||
+    typeof report.submittedAt !== "string" ||
+    typeof report.imageAccessToken !== "string" ||
+    typeof report.text !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    id: report.id,
+    submittedAt: report.submittedAt,
+    imageAccessToken: report.imageAccessToken,
+    sessionId: typeof report.sessionId === "string" ? report.sessionId : undefined,
+    sessionTitle:
+      typeof report.sessionTitle === "string" ? report.sessionTitle : undefined,
+    clientId: typeof report.clientId === "string" ? report.clientId : undefined,
+    pageUrl: typeof report.pageUrl === "string" ? report.pageUrl : undefined,
+    userAgent: typeof report.userAgent === "string" ? report.userAgent : undefined,
+    viewport: report.viewport,
+    remoteAddress:
+      typeof report.remoteAddress === "string" ? report.remoteAddress : undefined,
+    text: report.text,
+    images
+  };
+}
+
+async function readStoredBugReport(
+  dateSegment: string,
+  reportId: string
+): Promise<{
+  reportDir: string;
+  report: StoredBugReport;
+}> {
+  const reportDir = getReportDirectory(dateSegment, reportId);
+  const raw = await readFile(path.join(reportDir, "report.json"), "utf8");
+  const parsed = parseStoredBugReport(JSON.parse(raw));
+  if (!parsed || parsed.id !== reportId) {
+    throw new Error("Bug report was not found.");
+  }
+  return { reportDir, report: parsed };
+}
+
+export async function handleBugReportImageRequest(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const dateSegment = stringValue(req.params.date);
+    const reportId = stringValue(req.params.reportId);
+    const fileName = stringValue(req.params.fileName);
+    const token = singleQueryValue(req.query.token);
+    if (!dateSegment || !reportId || !fileName || !token) {
+      res.status(404).json({ error: "Bug report image was not found." });
+      return;
+    }
+
+    const { reportDir, report } = await readStoredBugReport(
+      dateSegment,
+      reportId
+    );
+    if (!safeTokenEquals(token, report.imageAccessToken)) {
+      res.status(404).json({ error: "Bug report image was not found." });
+      return;
+    }
+
+    const image = report.images.find(
+      (candidate) => candidate.fileName === fileName
+    );
+    if (!image) {
+      res.status(404).json({ error: "Bug report image was not found." });
+      return;
+    }
+
+    const imagePath = path.resolve(reportDir, image.fileName);
+    if (!imagePath.startsWith(`${reportDir}${path.sep}`)) {
+      res.status(404).json({ error: "Bug report image was not found." });
+      return;
+    }
+
+    const buffer = await readFile(imagePath);
+    res.status(200);
+    res.setHeader("Cache-Control", "private, max-age=604800");
+    res.setHeader("Content-Type", image.mimeType);
+    res.setHeader("Content-Length", String(buffer.byteLength));
+    res.setHeader("Content-Disposition", `inline; filename="${image.fileName}"`);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.send(buffer);
+  } catch {
+    res.status(404).json({ error: "Bug report image was not found." });
   }
 }
