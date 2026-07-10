@@ -98,7 +98,6 @@ import {
   loadSessionClientId
 } from "./features/sessions/sessionPersistence";
 import {
-  findSessionIdForMessage,
   findSessionMessage,
   mergeSessionFiles
 } from "./features/sessions/sessionSelectors";
@@ -131,12 +130,12 @@ import {
 } from "./features/artifacts/artifactEditTransitions";
 import {
   artifactSelectionToReference,
-  buildArtifactActionMessage,
   buildCompletedAssistantPatchFromRawStream
 } from "./features/artifacts/artifactMessageProjection";
 import { hasRenderError } from "./features/artifacts/renderErrors";
 import { buildVisualRepairPrompt } from "./features/artifacts/visualRepair";
 import { useArtifactSelections } from "./features/artifacts/useArtifactSelections";
+import { useArtifactActions } from "./features/artifacts/useArtifactActions";
 import { coerceApiSettingsForRuntime } from "./features/settings/appSettingsPolicy";
 import { useAppSettings } from "./features/settings/useAppSettings";
 import { useCloudAuthController } from "./features/auth/useCloudAuthController";
@@ -149,7 +148,6 @@ import { createStreamingRenderer } from "./runtime/streamui/streamingRenderer";
 import type {
   RenderError,
   RenderSnapshot,
-  StreamUiAction,
   StreamingRenderer
 } from "./runtime/streamui/types";
 
@@ -192,11 +190,6 @@ type PendingManagedRequest = {
   text: string;
   attachments: ImageAttachment[];
   options: SendStreamUiRequestOptions;
-};
-
-type PendingArtifactAction = {
-  messageId: string;
-  action: StreamUiAction;
 };
 
 type BranchRunCancelCleanup = {
@@ -322,7 +315,6 @@ export default function App() {
   const [pendingManagedRequestSlot] = useState(
     () => createPendingRequestSlot<PendingManagedRequest>(),
   );
-  const pendingArtifactActionRef = useRef<PendingArtifactAction | null>(null);
   const {
     getSelections: getArtifactSelections,
     changeSelections: handleArtifactSelectionsChange,
@@ -2216,48 +2208,18 @@ export default function App() {
     [startBranchedTurn]
   );
 
-  const runArtifactAction = useCallback(
-    (messageId: string, action: StreamUiAction): boolean => {
-      const text = buildArtifactActionMessage(action);
-      if (!text) {
-        return false;
-      }
-
-      const targetSessionId =
-        findSessionIdForMessage(sessionStateRef.current, messageId) ||
-        activeSessionIdRef.current;
-
+  const sendArtifactActionMessage = useCallback(
+    (text: string, targetSessionId: string) => {
       void sendStreamUiRequest(text, [], { targetSessionId });
-      return true;
     },
     [sendStreamUiRequest]
   );
-
-  const handleArtifactAction = useCallback(
-    (messageId: string, action: StreamUiAction) => {
-      if (isSendingRef.current) {
-        pendingArtifactActionRef.current = { messageId, action };
-        return;
-      }
-
-      runArtifactAction(messageId, action);
-    },
-    [runArtifactAction]
-  );
-
-  useEffect(() => {
-    if (isSending) {
-      return;
-    }
-
-    const pending = pendingArtifactActionRef.current;
-    if (!pending) {
-      return;
-    }
-
-    pendingArtifactActionRef.current = null;
-    runArtifactAction(pending.messageId, pending.action);
-  }, [isSending, runArtifactAction]);
+  const handleArtifactAction = useArtifactActions({
+    isSending,
+    isSendingRef,
+    sessionStateRef,
+    sendActionMessage: sendArtifactActionMessage
+  });
 
   const runArtifactSourceEdit = useCallback(
     async (
