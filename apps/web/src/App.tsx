@@ -28,12 +28,6 @@ import {
   type ReasoningEffort
 } from "./core/apiSettings";
 import { serializeSearchSettings } from "./core/searchSettings";
-import {
-  loadAuthSummary,
-  logout as logoutAuth,
-  type AuthSummary,
-  type AuthUser
-} from "./core/cloudAuth";
 import { buildArtifactContext } from "./core/artifactContext";
 import type { ArtifactSelection } from "./core/artifactSelection";
 import {
@@ -87,6 +81,13 @@ import {
   getAppendMessageImages,
   getAppendMessageText
 } from "./features/chat/assistantRuntimeAdapter";
+import { createPendingRequestSlot } from "./features/chat/pendingRequestSlot";
+import {
+  closeAuthAndDiscard,
+  openManualAuth,
+  queueManagedAuthRequest,
+  replayManagedAuthRequest
+} from "./features/chat/managedAuthContinuation";
 import { StreamThread } from "./features/chat/ui/StreamThread";
 import { submitBugReport } from "./features/bug-reports/bugReportApi";
 import {
@@ -143,6 +144,7 @@ import { hasRenderError } from "./features/artifacts/renderErrors";
 import { buildVisualRepairPrompt } from "./features/artifacts/visualRepair";
 import { coerceApiSettingsForRuntime } from "./features/settings/appSettingsPolicy";
 import { useAppSettings } from "./features/settings/useAppSettings";
+import { useCloudAuthController } from "./features/auth/useCloudAuthController";
 import type {
   ImageAttachment,
   UploadedSessionFile
@@ -264,9 +266,18 @@ export default function App() {
     updateApiSettings,
     applyMemoryEvent: handleMemoryStreamEvent
   } = useAppSettings();
-  const [authSummary, setAuthSummary] = useState<AuthSummary | null>(null);
-  const [authLoaded, setAuthLoaded] = useState(false);
-  const [isAuthOverlayOpen, setIsAuthOverlayOpen] = useState(false);
+  const {
+    summary: authSummary,
+    loaded: authLoaded,
+    user: authenticatedUser,
+    isOverlayOpen: isAuthOverlayOpen,
+    open: openAuthOverlay,
+    close: closeAuthOverlay,
+    acceptSummary: handleAuthChange,
+    updateUser: handleAuthUserChange,
+    refresh: refreshAuthSummary,
+    logout: logoutCloudAccount
+  } = useCloudAuthController({ cloudEnabled });
   const [isBugReportOpen, setIsBugReportOpen] = useState(false);
   const [bugReportSessionId, setBugReportSessionId] = useState<string | null>(
     null
@@ -311,7 +322,6 @@ export default function App() {
   const activeSessionUiComplexity = normalizeUiComplexity(
     activeSession?.uiComplexity ?? apiSettings.uiComplexity
   );
-  const authenticatedUser = cloudEnabled ? (authSummary?.user ?? null) : null;
   const selectableModels = useMemo(
     () =>
       getSelectableModelOptions(
@@ -340,7 +350,9 @@ export default function App() {
   >(new Map());
   const bugReportSuccessCloseTimerRef = useRef<number | null>(null);
   const localArtifactEditAbortRef = useRef<AbortController | null>(null);
-  const pendingManagedRequestRef = useRef<PendingManagedRequest | null>(null);
+  const [pendingManagedRequestSlot] = useState(
+    () => createPendingRequestSlot<PendingManagedRequest>(),
+  );
   const pendingArtifactActionRef = useRef<PendingArtifactAction | null>(null);
   const [artifactSelectionClearVersion, setArtifactSelectionClearVersion] =
     useState(0);
@@ -403,70 +415,19 @@ export default function App() {
     },
     []
   );
-  const refreshAuthSummary = useCallback(async () => {
-    if (!cloudEnabled) {
-      setAuthSummary(null);
-      setAuthLoaded(false);
-      return null;
-    }
-
-    const summary = await loadAuthSummary();
-    setAuthSummary(summary);
-    setAuthLoaded(true);
-    return summary;
-  }, [cloudEnabled]);
-  const handleAuthChange = useCallback((summary: AuthSummary) => {
-    setAuthSummary(summary);
-    setAuthLoaded(true);
-    setIsAuthOverlayOpen(false);
-  }, []);
   const handleAuthOverlayRequest = useCallback(() => {
-    pendingManagedRequestRef.current = null;
-    setIsAuthOverlayOpen(true);
-  }, []);
+    openManualAuth(pendingManagedRequestSlot, openAuthOverlay);
+  }, [openAuthOverlay, pendingManagedRequestSlot]);
   const handleAuthOverlayClose = useCallback(() => {
-    pendingManagedRequestRef.current = null;
-    setIsAuthOverlayOpen(false);
-  }, []);
+    closeAuthAndDiscard(pendingManagedRequestSlot, closeAuthOverlay);
+  }, [closeAuthOverlay, pendingManagedRequestSlot]);
   const handleLogout = useCallback(async () => {
     try {
-      const summary = await logoutAuth();
-      setAuthSummary(summary);
-    } catch (error) {
-      console.warn("Could not sign out of ChatHTML Cloud.", error);
-      setAuthSummary((current) =>
-        current
-          ? { ...current, user: null }
-          : {
-              user: null,
-              auth: {
-                available: false,
-                requiresInvite: false,
-                firstUser: false
-              }
-            }
-      );
+      await logoutCloudAccount();
     } finally {
-      setAuthLoaded(true);
-      setIsAuthOverlayOpen(false);
-      pendingManagedRequestRef.current = null;
+      pendingManagedRequestSlot.clear();
     }
-  }, []);
-  const handleAuthUserChange = useCallback((user: AuthUser) => {
-    setAuthSummary((current) =>
-      current
-        ? { ...current, user }
-        : {
-            user,
-            auth: {
-              available: true,
-              requiresInvite: false,
-              firstUser: false
-            }
-          }
-    );
-    setAuthLoaded(true);
-  }, []);
+  }, [logoutCloudAccount, pendingManagedRequestSlot]);
 
   useEffect(() => {
     sessionStateRef.current = sessionState;
@@ -507,40 +468,9 @@ export default function App() {
 
   useEffect(() => {
     if (!cloudEnabled) {
-      setAuthSummary(null);
-      setAuthLoaded(false);
-      setIsAuthOverlayOpen(false);
-      pendingManagedRequestRef.current = null;
-      return undefined;
+      pendingManagedRequestSlot.clear();
     }
-
-    let cancelled = false;
-    loadAuthSummary()
-      .then((summary) => {
-        if (!cancelled) {
-          setAuthSummary(summary);
-          setAuthLoaded(true);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          console.warn("Could not load ChatHTML Cloud account.", error);
-          setAuthSummary({
-            user: null,
-            auth: {
-              available: false,
-              requiresInvite: false,
-              firstUser: false
-            }
-          });
-          setAuthLoaded(true);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [cloudEnabled]);
+  }, [cloudEnabled, pendingManagedRequestSlot]);
 
   const sessionListPreview = useSessionIndex({
     sessionState,
@@ -1336,12 +1266,11 @@ export default function App() {
         cloudEnabled &&
         !authenticatedUser
       ) {
-        pendingManagedRequestRef.current = {
-          text,
-          attachments,
-          options
-        };
-        setIsAuthOverlayOpen(true);
+        queueManagedAuthRequest(
+          pendingManagedRequestSlot,
+          { text, attachments, options },
+          openAuthOverlay
+        );
         return;
       }
       const userMessageId = createId("user");
@@ -1749,6 +1678,8 @@ export default function App() {
       authenticatedUser,
       cloudEnabled,
       handleMemoryStreamEvent,
+      openAuthOverlay,
+      pendingManagedRequestSlot,
       refreshAuthSummary,
       runtimeSettings,
       searchSettings,
@@ -2300,7 +2231,7 @@ export default function App() {
         cloudEnabled &&
         !authenticatedUser
       ) {
-        setIsAuthOverlayOpen(true);
+        openAuthOverlay();
         return true;
       }
 
@@ -2494,6 +2425,7 @@ export default function App() {
       apiSettings,
       authenticatedUser,
       cloudEnabled,
+      openAuthOverlay,
       refreshAuthSummary,
       runtimeSettings,
       saveCurrentSessionStateNow,
@@ -2730,7 +2662,7 @@ export default function App() {
         cloudEnabled &&
         !authenticatedUser
       ) {
-        setIsAuthOverlayOpen(true);
+        openAuthOverlay();
         return;
       }
 
@@ -2846,6 +2778,7 @@ export default function App() {
       apiSettings,
       authenticatedUser,
       cloudEnabled,
+      openAuthOverlay,
       refreshAuthSummary,
       runtimeSettings,
       saveCurrentSessionStateNow,
@@ -3145,15 +3078,25 @@ export default function App() {
       return;
     }
 
-    const pending = pendingManagedRequestRef.current;
-    if (!pending) {
-      return;
-    }
-
-    pendingManagedRequestRef.current = null;
-    setIsAuthOverlayOpen(false);
-    void sendStreamUiRequest(pending.text, pending.attachments, pending.options);
-  }, [authenticatedUser, cloudEnabled, sendStreamUiRequest, sessionsLoaded]);
+    replayManagedAuthRequest(
+      pendingManagedRequestSlot,
+      closeAuthOverlay,
+      (pending) => {
+        void sendStreamUiRequest(
+          pending.text,
+          pending.attachments,
+          pending.options
+        );
+      }
+    );
+  }, [
+    authenticatedUser,
+    closeAuthOverlay,
+    cloudEnabled,
+    pendingManagedRequestSlot,
+    sendStreamUiRequest,
+    sessionsLoaded
+  ]);
 
   const handleArtifactSelectionsChange = useCallback(
     (selections: ArtifactSelection[]) => {
