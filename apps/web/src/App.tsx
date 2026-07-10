@@ -37,15 +37,12 @@ import {
 import { captureCurrentPageScreenshotBlob } from "./core/pageScreenshot";
 import { modelLikelySupportsImageInput } from "./core/modelCapabilities";
 import {
-  compactEmptySessions,
   createEmptyBugReportDraft,
-  createEmptySession,
   createId,
   createInitialSessionState,
   getSessionStreamingRunIds,
   interruptStaleArtifactEditsInSessionState,
   initialMessages,
-  isSessionEmpty,
   normalizeStoredSessionState,
   normalizeBugReportDraft,
   sortSessions,
@@ -115,6 +112,7 @@ import {
 import { useSessionSync } from "./features/sessions/useSessionSync";
 import { useSessionSave } from "./features/sessions/useSessionSave";
 import { useSessionIndex } from "./features/sessions/useSessionIndex";
+import { useSessionActions } from "./features/sessions/useSessionActions";
 import {
   commitUploadedImageFile,
   createArtifactFileUpload,
@@ -525,53 +523,23 @@ export default function App() {
     deletedSessionIdsRef
   });
 
-  const updateActiveSession = useCallback(
-    (updater: (session: ChatSession) => ChatSession) => {
-      setSessionStateAndRef((current) => {
-        let didUpdate = false;
-        const sessions = current.sessions.map((session) => {
-          if (session.id !== current.activeSessionId) {
-            return session;
-          }
-
-          didUpdate = true;
-          return updater(session);
-        });
-
-        return didUpdate
-          ? {
-              ...current,
-              sessions: sortSessions(sessions)
-            }
-          : current;
-      });
-    },
-    [setSessionStateAndRef]
-  );
-
-  const updateSessionById = useCallback(
-    (sessionId: string, updater: (session: ChatSession) => ChatSession) => {
-      setSessionStateAndRef((current) => {
-        let didUpdate = false;
-        const sessions = current.sessions.map((session) => {
-          if (session.id !== sessionId) {
-            return session;
-          }
-
-          didUpdate = true;
-          return updater(session);
-        });
-
-        return didUpdate
-          ? {
-              ...current,
-              sessions: sortSessions(sessions)
-            }
-          : current;
-      });
-    },
-    [setSessionStateAndRef]
-  );
+  const {
+    updateActiveSession,
+    updateSessionById,
+    createNewSession: handleNewSession,
+    selectSession: handleSelectSession,
+    deleteSession: handleDeleteSession
+  } = useSessionActions({
+    sessionStateRef,
+    isNewOrDeleteBlockedRef: isSendingRef,
+    transientEmptySessionIdRef,
+    deletedSessionIdsRef,
+    replaceState: setSessionStateAndRef,
+    saveNow: saveCurrentSessionStateNow,
+    defaultModel: apiSettings.model,
+    defaultReasoningEffort: apiSettings.reasoningEffort,
+    defaultUiComplexity: apiSettings.uiComplexity
+  });
 
   const handleBugReportDraftChange = useCallback(
     (draft: BugReportDraft) => {
@@ -1063,112 +1031,6 @@ export default function App() {
     },
     [updateActiveSession]
   );
-
-  const handleNewSession = useCallback(() => {
-    if (isSendingRef.current) {
-      return;
-    }
-
-    setSessionStateAndRef((current) => {
-      const compacted = compactEmptySessions(current, {
-        preserveActiveEmpty: true
-      });
-      const active = compacted.sessions.find(
-        (session) => session.id === compacted.activeSessionId
-      );
-      if (active && isSessionEmpty(active)) {
-        transientEmptySessionIdRef.current = active.id;
-        return compacted;
-      }
-
-      const session = createEmptySession(
-        undefined,
-        undefined,
-        apiSettings.model,
-        apiSettings.reasoningEffort,
-        apiSettings.uiComplexity
-      );
-      transientEmptySessionIdRef.current = session.id;
-      return {
-        sessions: [session, ...compacted.sessions],
-        activeSessionId: session.id
-      };
-    });
-  }, [
-    apiSettings.model,
-    apiSettings.reasoningEffort,
-    apiSettings.uiComplexity,
-    setSessionStateAndRef
-  ]);
-
-  const handleSelectSession = useCallback((id: string) => {
-    setSessionStateAndRef((current) => {
-      const target = current.sessions.find((session) => session.id === id);
-      if (!target) {
-        return current;
-      }
-      if (target.id !== transientEmptySessionIdRef.current) {
-        transientEmptySessionIdRef.current = null;
-      }
-
-      return compactEmptySessions(
-        {
-          ...current,
-          activeSessionId: id
-        },
-        { preserveActiveEmpty: isSessionEmpty(target) }
-      );
-    });
-  }, [setSessionStateAndRef]);
-
-  const handleDeleteSession = useCallback((id: string) => {
-    if (isSendingRef.current) {
-      return;
-    }
-
-    if (transientEmptySessionIdRef.current === id) {
-      transientEmptySessionIdRef.current = null;
-    }
-    deletedSessionIdsRef.current.add(id);
-    setSessionStateAndRef((current) => {
-      const remaining = current.sessions.filter((session) => session.id !== id);
-      if (!remaining.length) {
-        const session = createEmptySession(
-          undefined,
-          undefined,
-          apiSettings.model,
-          apiSettings.reasoningEffort,
-          apiSettings.uiComplexity
-        );
-        return {
-          sessions: [session],
-          activeSessionId: session.id
-        };
-      }
-
-      const activeSessionId =
-        current.activeSessionId === id ? remaining[0].id : current.activeSessionId;
-
-      return compactEmptySessions(
-        {
-          sessions: remaining,
-          activeSessionId
-        },
-        {
-          preserveActiveEmpty: remaining.some(
-            (session) => session.id === activeSessionId && isSessionEmpty(session)
-          )
-        }
-      );
-    });
-    saveCurrentSessionStateNow();
-  }, [
-    apiSettings.model,
-    apiSettings.reasoningEffort,
-    apiSettings.uiComplexity,
-    saveCurrentSessionStateNow,
-    setSessionStateAndRef
-  ]);
 
   const handleModelChange = useCallback((model: string) => {
     const nextModel = model.trim();
