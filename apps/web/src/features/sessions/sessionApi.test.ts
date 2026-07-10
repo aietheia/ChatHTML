@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  createSessionPageExitTransport,
   deleteSessionFile,
   requestSessionIndex,
   requestSessions,
@@ -145,5 +146,30 @@ describe("session API", () => {
     assert.equal(fallback.calls[0].init?.method, "PUT");
     assert.equal(fallback.calls[0].init?.keepalive, true);
     assert.equal(fallback.calls[0].init?.body, "{\"sessions\":[]}");
+  });
+
+  it("binds page-exit browser methods to their native owners", async () => {
+    let fetchOwner: unknown;
+    let beaconOwner: unknown;
+    const navigatorOwner = {
+      sendBeacon(this: unknown) {
+        beaconOwner = this;
+        return false;
+      }
+    };
+    const environment = {
+      fetch(this: unknown) {
+        fetchOwner = this;
+        return Promise.resolve(new Response(null, { status: 204 }));
+      },
+      navigator: navigatorOwner
+    };
+    const transport = createSessionPageExitTransport(environment);
+
+    await transport.fetch("/api/sessions");
+    transport.sendBeacon?.("/api/sessions", new Blob());
+
+    assert.equal(fetchOwner, environment);
+    assert.equal(beaconOwner, navigatorOwner);
   });
 });

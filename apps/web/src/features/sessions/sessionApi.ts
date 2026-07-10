@@ -11,6 +11,13 @@ export type SessionPageExitTransport = {
   sendBeacon?: (url: string, data: BodyInit) => boolean;
 };
 
+export type SessionPageExitEnvironment = {
+  fetch: FetchLike;
+  navigator?: {
+    sendBeacon?(url: string, data: BodyInit): boolean;
+  };
+};
+
 export function sessionRequestHeaders(
   clientId: string,
   contentType?: string
@@ -101,15 +108,22 @@ export function saveSerializedSessionState(
   });
 }
 
-function defaultPageExitTransport(): SessionPageExitTransport {
+export function createSessionPageExitTransport(
+  environment: SessionPageExitEnvironment
+): SessionPageExitTransport {
   return {
-    fetch,
+    fetch: environment.fetch.bind(environment),
     sendBeacon:
-      typeof navigator !== "undefined" &&
-      typeof navigator.sendBeacon === "function"
-        ? navigator.sendBeacon.bind(navigator)
+      typeof environment.navigator?.sendBeacon === "function"
+        ? environment.navigator.sendBeacon.bind(environment.navigator)
         : undefined
   };
+}
+
+function defaultPageExitTransport(): SessionPageExitTransport {
+  return typeof window !== "undefined"
+    ? createSessionPageExitTransport(window)
+    : { fetch };
 }
 
 export function saveSessionStateOnPageExit(
