@@ -1,4 +1,5 @@
 export type ChatRunTerminalOutcome = "complete" | "error" | "cancelled";
+export const CHAT_RUN_CANCELLED_MESSAGE = "Generation stopped.";
 
 export type ChatRunPersistenceTerminalStatus = "complete" | "error";
 
@@ -16,13 +17,13 @@ export type ChatRunTerminalTransition = {
 };
 
 export function createChatRunTerminalTransition(
-  status: ChatRunPersistenceTerminalStatus,
-  error: string | undefined,
-  cancelRequested: boolean
+  outcome: ChatRunTerminalOutcome,
+  error?: string
 ): ChatRunTerminalTransition {
-  const outcome: ChatRunTerminalOutcome = cancelRequested
-    ? "cancelled"
-    : status;
+  const persistenceStatus: ChatRunPersistenceTerminalStatus =
+    outcome === "error" ? "error" : "complete";
+  const persistenceError =
+    outcome === "cancelled" ? CHAT_RUN_CANCELLED_MESSAGE : error;
   return {
     outcome,
     streamEvent: {
@@ -30,7 +31,10 @@ export function createChatRunTerminalTransition(
       status: outcome,
       ...(outcome === "error" && error ? { error } : {})
     },
-    persistence: { status, error }
+    persistence: {
+      status: persistenceStatus,
+      error: persistenceError
+    }
   };
 }
 

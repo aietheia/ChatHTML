@@ -28,7 +28,8 @@ describe("chat run presentation", () => {
       content: "Plain partial answer",
       rawStream: "Plain partial answer",
       hasStreamUi: false,
-      streamUiComplete: false
+      streamUiComplete: false,
+      generationOutcome: undefined
     });
     assert.equal(
       Object.prototype.hasOwnProperty.call(result.patch, "snapshot"),
@@ -58,6 +59,7 @@ describe("chat run presentation", () => {
       rawStream: raw,
       hasStreamUi: true,
       streamUiComplete: false,
+      generationOutcome: undefined,
       streamSequence: 3
     });
   });
@@ -106,6 +108,7 @@ describe("chat run presentation", () => {
       artifactContext: undefined,
       hasStreamUi: false,
       streamUiComplete: false,
+      generationOutcome: "complete",
       status: "complete"
     });
     assert.equal(
@@ -193,6 +196,7 @@ describe("chat run presentation", () => {
       reasoning: "Thinking",
       rawStream: "<chat>Partial answer</chat><streamui><div>Work",
       streamSequence: 5,
+      generationOutcome: "error",
       error: "Provider failed",
       status: "error"
     });

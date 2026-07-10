@@ -54,9 +54,14 @@ function normalizeSequence(value: number | undefined): number {
 }
 
 function terminalAssistantPhase(
-  status: ClientMessage["status"] | undefined
-): "complete" | "error" | undefined {
-  return status === "complete" || status === "error" ? status : undefined;
+  message: ClientMessage
+): "complete" | "error" | "cancelled" | undefined {
+  if (message.generationOutcome) {
+    return message.generationOutcome;
+  }
+  return message.status === "complete" || message.status === "error"
+    ? message.status
+    : undefined;
 }
 
 function rejected(state: ChatRunState): ChatRunStateResult {
@@ -94,7 +99,7 @@ function reduceServerMessage(
     return rejected(state);
   }
 
-  const terminalPhase = terminalAssistantPhase(message.status);
+  const terminalPhase = terminalAssistantPhase(message);
   if (state.terminal?.source === "stream" && !terminalPhase) {
     return rejected(state);
   }

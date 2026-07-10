@@ -5,10 +5,17 @@ import {
   getGeneratedArtifactBatchIdentity
 } from "./generatedArtifactBatchPersistence.js";
 import {
+  CHAT_RUN_CANCELLED_MESSAGE,
   createChatRunTerminalTransition,
   finalizeChatRunTerminal,
   type ChatRunTerminalOutcome
 } from "./chatRunFinalization.js";
+import {
+  createChatRunTerminalCoordinator,
+  type ChatRunTerminalCoordinator,
+  type ChatRunTerminalResult
+} from "./chatRunTerminalCoordinator.js";
+import { createChatRunCancellationHandler } from "./chatRunCancellationRoute.js";
 import {
   ActiveEphemeralFileDeletionError,
   activeEphemeralFileRegistry,
@@ -48,7 +55,6 @@ import {
 import {
   deleteEphemeralSessionFiles,
   getSessionStateKeyFromClientId,
-  patchSessionMessage,
   updateSessionMessageAtomically,
   upsertSessionMessages,
   type SessionMessageInput,
@@ -265,7 +271,7 @@ type ChatRun = {
   id: string;
   input: ChatRunInput;
   abortController: AbortController;
-  cancelRequested?: boolean;
+  terminalCoordinator: ChatRunTerminalCoordinator;
   events: SequencedStreamEvent[];
   subscribers: Set<(event: SequencedStreamEvent) => void>;
   sequence: number;
@@ -284,7 +290,6 @@ type ChatRun = {
 const chatRuns = new Map<string, ChatRun>();
 const CHAT_RUN_TTL_MS = 10 * 60 * 1000;
 const STREAM_PERSIST_INTERVAL_MS = 500;
-const CHAT_CANCELLED_MESSAGE = "Generation stopped.";
 const RESPONSES_MAX_OUTPUT_TOKENS = 16_000;
 const ARTIFACT_EDIT_MAX_OUTPUT_TOKENS = 32_000;
 let activeChatFinalizations = 0;
@@ -444,25 +449,26 @@ function stripProtocolTags(raw: string): string {
     .trim();
 }
 
-function getStreamUiMessagePatch(
+export function buildChatRunMessagePatch(
   raw: string,
   reasoning: string,
   status: "streaming" | "complete" | "error",
   streamSequence: number,
   generationRunId: string,
-  error?: string
+  error?: string,
+  generationOutcome?: ChatRunTerminalOutcome
 ): SessionMessagePatch {
   const chat = extractBetweenTag(raw, "chat");
   const sessionTitle = extractBetweenTag(raw, "sessiontitle");
   const streamui = extractStreamUi(raw);
   const content = chat.content.trim() || (!streamui.hasOpen ? stripProtocolTags(raw) : "");
-  const isCancelled = status === "complete" && error === CHAT_CANCELLED_MESSAGE;
+  const isCancelled = generationOutcome === "cancelled";
 
   return {
     content:
       content ||
       (isCancelled
-        ? CHAT_CANCELLED_MESSAGE
+        ? CHAT_RUN_CANCELLED_MESSAGE
         : status === "error" && !raw
           ? "I could not complete that request."
           : ""),
@@ -475,20 +481,28 @@ function getStreamUiMessagePatch(
     streamUiComplete: streamui.hasClose,
     generationRunId,
     streamSequence,
+    generationOutcome,
     status,
     ...(error && !isCancelled ? { error } : {})
   };
 }
 
+export function canPersistChatRunMessage(
+  message: Readonly<{ generationRunId?: string }>,
+  runId: string
+): boolean {
+  return message.generationRunId === runId;
+}
+
 function isAbortError(error: unknown): boolean {
   return (
     error instanceof Error &&
-    (error.name === "AbortError" || error.message === CHAT_CANCELLED_MESSAGE)
+    (error.name === "AbortError" || error.message === CHAT_RUN_CANCELLED_MESSAGE)
   );
 }
 
 function createAbortError(): Error {
-  const error = new Error(CHAT_CANCELLED_MESSAGE);
+  const error = new Error(CHAT_RUN_CANCELLED_MESSAGE);
   error.name = "AbortError";
   return error;
 }
@@ -803,6 +817,14 @@ export function normalizeSessionMessageInput(
         ? Math.max(0, Math.round(message.streamSequence))
         : undefined;
   }
+  if (has("generationOutcome")) {
+    normalized.generationOutcome =
+      message.generationOutcome === "complete" ||
+      message.generationOutcome === "error" ||
+      message.generationOutcome === "cancelled"
+        ? message.generationOutcome
+        : undefined;
+  }
   if (has("status")) {
     normalized.status =
       message.status === "streaming" ||
@@ -834,7 +856,12 @@ function createChatRunInput(body: ChatRequestBody, requestId: string): ChatRunIn
   const canvasContext = normalizeCanvasContext(body.canvas);
   const themeMode = normalizeThemeMode(body.themeMode);
   const userMessage = normalizeSessionMessageInput(body.userMessage);
-  const assistantMessage = normalizeSessionMessageInput(body.assistantMessage);
+  const normalizedAssistantMessage = normalizeSessionMessageInput(
+    body.assistantMessage
+  );
+  const assistantMessage = normalizedAssistantMessage
+    ? { ...normalizedAssistantMessage, generationOutcome: undefined }
+    : undefined;
   const requestedRunId = stringValue(body.runId, 160);
   const stateKey = getSessionStateKeyFromClientId(body.clientId);
   const runId =
@@ -977,7 +1004,8 @@ function appendRunEvent(run: ChatRun, event: StreamEvent | ChatDoneEvent): void 
 function queueRunPersistence(
   run: ChatRun,
   status: "streaming" | "complete" | "error",
-  error?: string
+  error?: string,
+  generationOutcome?: ChatRunTerminalOutcome
 ): Promise<void> {
   const sessionId = run.input.sessionId;
   const assistantMessageId = run.input.assistantMessage?.id;
@@ -985,62 +1013,65 @@ function queueRunPersistence(
     return Promise.resolve();
   }
 
-  const streamPatch = getStreamUiMessagePatch(
+  const streamPatch = buildChatRunMessagePatch(
     run.raw,
     run.reasoning,
     status,
     run.sequence,
     run.id,
-    error
+    error,
+    generationOutcome
   );
   const artifactBatchIdentity = getGeneratedArtifactBatchIdentity(
     run.input.assistantMessage
   );
-  run.persistPromise = run.persistPromise
-    .then(async () => {
-      if (artifactBatchIdentity) {
-        await updateSessionMessageAtomically({
-          stateKey: run.input.stateKey,
-          sessionId,
-          messageId: assistantMessageId,
-          update: (currentMessage) => {
-            if (
-              !canPersistGeneratedArtifactBatch(
-                currentMessage,
-                run.id,
-                artifactBatchIdentity
-              )
-            ) {
-              return undefined;
-            }
-
-            return finalizeGeneratedArtifactBatchPatch({
-              assistantMessage: currentMessage,
-              patch: streamPatch,
-              status,
-              error,
-              expectedIdentity: artifactBatchIdentity
-            });
-          }
-        });
-        return;
-      }
-
-      await patchSessionMessage({
+  const operation = run.persistPromise.then(async () => {
+    if (artifactBatchIdentity) {
+      await updateSessionMessageAtomically({
         stateKey: run.input.stateKey,
         sessionId,
         messageId: assistantMessageId,
-        patch: streamPatch
-      });
-    })
-    .catch((persistError) => {
-      console.warn(
-        `[chat:${run.input.requestId}] could not persist stream state`,
-        persistError
-      );
-    });
+        update: (currentMessage) => {
+          if (
+            !canPersistGeneratedArtifactBatch(
+              currentMessage,
+              run.id,
+              artifactBatchIdentity
+            )
+          ) {
+            return undefined;
+          }
 
-  return run.persistPromise;
+          return finalizeGeneratedArtifactBatchPatch({
+            assistantMessage: currentMessage,
+            patch: streamPatch,
+            status,
+            error,
+            expectedIdentity: artifactBatchIdentity
+          });
+        }
+      });
+      return;
+    }
+
+    await updateSessionMessageAtomically({
+      stateKey: run.input.stateKey,
+      sessionId,
+      messageId: assistantMessageId,
+      update: (currentMessage) =>
+        canPersistChatRunMessage(currentMessage, run.id)
+          ? streamPatch
+          : undefined
+    });
+  });
+  run.persistPromise = operation.catch((persistError) => {
+    console.warn(
+      `[chat:${run.input.requestId}] could not persist stream state`,
+      persistError
+    );
+  });
+
+  return operation;
 }
 
 function scheduleRunPersistence(run: ChatRun): void {
@@ -1050,21 +1081,22 @@ function scheduleRunPersistence(run: ChatRun): void {
 
   run.persistTimer = setTimeout(() => {
     run.persistTimer = undefined;
-    void queueRunPersistence(run, "streaming");
+    void queueRunPersistence(run, "streaming").catch(() => undefined);
   }, STREAM_PERSIST_INTERVAL_MS);
 }
 
 async function flushRunPersistence(
   run: ChatRun,
   status: "streaming" | "complete" | "error",
-  error?: string
+  error?: string,
+  generationOutcome?: ChatRunTerminalOutcome
 ): Promise<void> {
   if (run.persistTimer) {
     clearTimeout(run.persistTimer);
     run.persistTimer = undefined;
   }
 
-  await queueRunPersistence(run, status, error);
+  await queueRunPersistence(run, status, error, generationOutcome);
 }
 
 function scheduleRunCleanup(run: ChatRun): void {
@@ -1146,31 +1178,18 @@ async function cleanupRunEphemeralFiles(
 
 function finishChatRun(
   run: ChatRun,
-  status: "complete" | "error",
+  outcome: ChatRunTerminalOutcome,
   error?: string
-): void {
-  if (run.status !== "running") {
-    return;
+): ChatRunTerminalResult {
+  const result = run.terminalCoordinator.transition(outcome, error);
+  if (!result.transitioned) {
+    return result;
   }
 
-  run.status = status;
-  run.error = error;
-  const transition = createChatRunTerminalTransition(
-    status,
-    error,
-    Boolean(run.cancelRequested) ||
-      (status === "complete" && error === CHAT_CANCELLED_MESSAGE)
-  );
-  appendRunEvent(run, transition.streamEvent);
   activeChatFinalizations += 1;
   void finalizeChatRunTerminal({
-    outcome: transition.outcome,
-    persistTerminalState: () =>
-      flushRunPersistence(
-        run,
-        transition.persistence.status,
-        transition.persistence.error
-      ),
+    outcome: result.outcome,
+    persistTerminalState: () => result.persistence,
     waitForExecution: () => run.executionSettled,
     cleanupEphemeralFiles: () =>
       cleanupReleasedEphemeralFiles(
@@ -1191,17 +1210,15 @@ function finishChatRun(
       scheduleRunCleanup(run);
       refreshOpenRouterIdleState();
     });
+  return result;
 }
 
-function cancelChatRun(run: ChatRun): boolean {
-  if (run.status !== "running") {
-    return false;
+function cancelChatRun(run: ChatRun): ChatRunTerminalResult {
+  const result = finishChatRun(run, "cancelled");
+  if (result.transitioned) {
+    run.abortController.abort();
   }
-
-  run.cancelRequested = true;
-  run.abortController.abort();
-  finishChatRun(run, "complete", CHAT_CANCELLED_MESSAGE);
-  return true;
+  return result;
 }
 
 async function executeChatRun(run: ChatRun): Promise<void> {
@@ -1213,8 +1230,8 @@ async function executeChatRun(run: ChatRun): Promise<void> {
     if (run.status !== "running") {
       return;
     }
-    if (run.cancelRequested || isAbortError(error)) {
-      finishChatRun(run, "complete", CHAT_CANCELLED_MESSAGE);
+    if (isAbortError(error)) {
+      finishChatRun(run, "cancelled");
       return;
     }
 
@@ -1247,10 +1264,35 @@ function startChatRun(input: ChatRunInput): ChatRun {
     input.files,
     input.ephemeralFileIds
   );
-  const run: ChatRun = {
+  let run: ChatRun;
+  const terminalCoordinator = createChatRunTerminalCoordinator({
+    onTransition: (claim) => {
+      const transition = createChatRunTerminalTransition(
+        claim.outcome,
+        claim.error
+      );
+      run.status = transition.persistence.status;
+      run.error = transition.persistence.error;
+      appendRunEvent(run, transition.streamEvent);
+    },
+    persist: (claim) => {
+      const transition = createChatRunTerminalTransition(
+        claim.outcome,
+        claim.error
+      );
+      return flushRunPersistence(
+        run,
+        transition.persistence.status,
+        transition.persistence.error,
+        transition.outcome
+      );
+    }
+  });
+  run = {
     id: input.runId,
     input,
     abortController: new AbortController(),
+    terminalCoordinator,
     events: [],
     subscribers: new Set(),
     sequence: 0,
@@ -3030,22 +3072,15 @@ export async function handleChatRunEvents(
   attachChatRun(req, res, run, getAfterSequence(req.query.after));
 }
 
-export async function handleCancelChatRun(
-  req: Request,
-  res: Response
-): Promise<void> {
-  const runId = stringValue(req.params.runId, 160);
-  const run = chatRuns.get(runId);
-  if (!run) {
-    res.status(404).json({ error: "Chat run not found." });
-    return;
+export const handleCancelChatRun = createChatRunCancellationHandler({
+  findRun: (runId) => {
+    const run = chatRuns.get(runId);
+    return run
+      ? {
+          runId: run.id,
+          requestId: run.input.requestId,
+          cancel: () => cancelChatRun(run)
+        }
+      : undefined;
   }
-
-  const cancelled = cancelChatRun(run);
-  res.json({
-    ok: true,
-    runId: run.id,
-    status: run.status,
-    cancelled
-  });
-}
+});

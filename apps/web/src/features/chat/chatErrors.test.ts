@@ -48,6 +48,7 @@ describe("chat errors", () => {
         streamSequence: 3,
         hasStreamUi: false,
         streamUiComplete: false,
+        generationOutcome: "cancelled",
         status: "complete",
         error: undefined
       }

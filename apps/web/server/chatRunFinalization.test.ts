@@ -10,9 +10,7 @@ describe("chat run terminal resource finalization", () => {
   it("keeps cancellation explicit on the wire while preserving its storage marker", () => {
     assert.deepEqual(
       createChatRunTerminalTransition(
-        "complete",
-        "Generation stopped.",
-        true
+        "cancelled"
       ),
       {
         outcome: "cancelled",
@@ -27,7 +25,7 @@ describe("chat run terminal resource finalization", () => {
 
   it("preserves ordinary complete and error terminal transitions", () => {
     assert.deepEqual(
-      createChatRunTerminalTransition("complete", undefined, false),
+      createChatRunTerminalTransition("complete"),
       {
         outcome: "complete",
         streamEvent: { type: "done", status: "complete" },
@@ -35,7 +33,7 @@ describe("chat run terminal resource finalization", () => {
       }
     );
     assert.deepEqual(
-      createChatRunTerminalTransition("error", "Provider failed", false),
+      createChatRunTerminalTransition("error", "Provider failed"),
       {
         outcome: "error",
         streamEvent: {

@@ -80,6 +80,7 @@ export type ClientMessage = {
   activeArtifactEditId?: string;
   generationRunId?: string;
   streamSequence?: number;
+  generationOutcome?: "complete" | "error" | "cancelled";
   status?: "streaming" | "complete" | "error";
   error?: string;
 };
@@ -1741,6 +1742,12 @@ export function normalizeStoredMessage(
     streamSequence:
       typeof input.streamSequence === "number" && Number.isFinite(input.streamSequence)
         ? Math.max(0, Math.round(input.streamSequence))
+        : undefined,
+    generationOutcome:
+      input.generationOutcome === "complete" ||
+      input.generationOutcome === "error" ||
+      input.generationOutcome === "cancelled"
+        ? input.generationOutcome
         : undefined,
     status:
       input.status === "streaming" ||

@@ -5,7 +5,11 @@ import {
   finalizeGeneratedArtifactBatchPatch,
   getGeneratedArtifactBatchIdentity
 } from "./generatedArtifactBatchPersistence.js";
-import { normalizeSessionMessageInput } from "./openrouter.js";
+import {
+  buildChatRunMessagePatch,
+  canPersistChatRunMessage,
+  normalizeSessionMessageInput
+} from "./openrouter.js";
 import { selectPresentSessionMessagePatch } from "./sessions.js";
 
 function pendingMessage(operationId = "operation-1", createdAt = 10) {
@@ -40,6 +44,52 @@ function pendingMessage(operationId = "operation-1", createdAt = 10) {
 }
 
 describe("chat run persistence compare-and-swap", () => {
+  it("clears streaming outcomes and marks every terminal outcome", () => {
+    const streaming = buildChatRunMessagePatch(
+      "partial",
+      "",
+      "streaming",
+      1,
+      "run-1"
+    );
+    const complete = buildChatRunMessagePatch(
+      "done",
+      "",
+      "complete",
+      2,
+      "run-1",
+      undefined,
+      "complete"
+    );
+    const failed = buildChatRunMessagePatch(
+      "",
+      "",
+      "error",
+      2,
+      "run-1",
+      "Provider failed",
+      "error"
+    );
+    const cancelled = buildChatRunMessagePatch(
+      "",
+      "",
+      "complete",
+      2,
+      "run-1",
+      "Generation stopped.",
+      "cancelled"
+    );
+
+    assert.equal(Object.hasOwn(streaming, "generationOutcome"), true);
+    assert.equal(streaming.generationOutcome, undefined);
+    assert.equal(complete.generationOutcome, "complete");
+    assert.equal(failed.generationOutcome, "error");
+    assert.equal(failed.error, "Provider failed");
+    assert.equal(cancelled.generationOutcome, "cancelled");
+    assert.equal(cancelled.content, "Generation stopped.");
+    assert.equal(cancelled.error, undefined);
+  });
+
   it("requires the current run and the complete artifact operation token", () => {
     const original = pendingMessage();
     const identity = getGeneratedArtifactBatchIdentity(original);
@@ -71,6 +121,23 @@ describe("chat run persistence compare-and-swap", () => {
     );
   });
 
+  it("does not let an older ordinary run overwrite a replacement", () => {
+    assert.equal(
+      canPersistChatRunMessage(
+        { generationRunId: "run-2" },
+        "run-1"
+      ),
+      false
+    );
+    assert.equal(
+      canPersistChatRunMessage(
+        { generationRunId: "run-1" },
+        "run-1"
+      ),
+      true
+    );
+  });
+
   it("does not build a stale terminal patch for a replaced operation", () => {
     const identity = getGeneratedArtifactBatchIdentity(pendingMessage());
     assert.ok(identity);
@@ -99,7 +166,8 @@ describe("existing message initial persistence", () => {
       content: "",
       rawStream: "",
       artifactEdits: pendingMessage().artifactEdits,
-      activeArtifactEditId: "edit-1"
+      activeArtifactEditId: "edit-1",
+      generationOutcome: "complete"
     });
     assert.ok(normalized);
 
@@ -112,6 +180,7 @@ describe("existing message initial persistence", () => {
     assert.equal(Object.hasOwn(normalized, "fileIds"), false);
     assert.equal(Object.hasOwn(normalized, "artifactContext"), false);
     assert.equal(Object.hasOwn(normalized, "runtimeErrors"), false);
+    assert.equal(normalized.generationOutcome, "complete");
   });
 
   it("retains explicit clears while preserving every omitted field", () => {
@@ -125,6 +194,7 @@ describe("existing message initial persistence", () => {
       artifactEdits: pendingMessage().artifactEdits,
       activeArtifactEditId: "edit-1",
       generationRunId: "run-1",
+      generationOutcome: null,
       status: "streaming"
     });
     assert.ok(input);
@@ -146,6 +216,8 @@ describe("existing message initial persistence", () => {
     assert.equal(patch.reasoning, undefined);
     assert.equal(Object.hasOwn(patch, "branchAnchor"), true);
     assert.equal(patch.branchAnchor, undefined);
+    assert.equal(Object.hasOwn(patch, "generationOutcome"), true);
+    assert.equal(patch.generationOutcome, undefined);
     assert.equal(merged.branchGroupId, "branch-group");
     assert.equal(merged.branchVariantId, "branch-variant");
     assert.deepEqual(merged.fileIds, ["file-1"]);

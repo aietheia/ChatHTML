@@ -204,18 +204,19 @@ describe("generated artifact batch terminal persistence", () => {
     const patch = terminalPatch({
       content: CHAT_RUN_CANCELLED_MESSAGE,
       rawStream: "",
-      reasoning: "Temporary reasoning"
+      reasoning: "Temporary reasoning",
+      generationOutcome: "cancelled"
     });
 
     const result = finalizeGeneratedArtifactBatchPatch({
       assistantMessage: message,
       patch,
-      status: "complete",
-      error: CHAT_RUN_CANCELLED_MESSAGE
+      status: "complete"
     });
 
     assert.equal(result.status, "complete");
     assert.equal(result.error, undefined);
+    assert.equal(result.generationOutcome, "cancelled");
     assert.equal(result.rawStream, parentRaw);
     assert.equal(result.content, "Parent explanation");
     assert.equal(result.reasoning, undefined);

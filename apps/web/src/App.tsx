@@ -998,6 +998,7 @@ export default function App() {
         rawStream: "",
         generationRunId,
         streamSequence: 0,
+        generationOutcome: undefined,
         status: "streaming",
         ...(options.initialReasoning
           ? { reasoning: options.initialReasoning }
@@ -1198,6 +1199,7 @@ export default function App() {
           {
             content: "I could not complete that request.",
             error: "The chat request could not be initialized.",
+            generationOutcome: "error",
             status: "error"
           },
           "error"
@@ -1283,6 +1285,7 @@ export default function App() {
             reasoning: runState.reasoning,
             rawStream: runState.raw,
             streamSequence: runState.streamSequence,
+            generationOutcome: "error",
             status: "error"
           },
           "error"
@@ -1883,6 +1886,7 @@ export default function App() {
             updateRestoredAssistant(
               {
                 content: "I could not complete that request.",
+                generationOutcome: "error",
                 status: "error",
                 error: STREAM_INTERRUPTED_ERROR
               },
@@ -1944,6 +1948,7 @@ export default function App() {
             updateRestoredAssistant(
               {
                 content: "I could not complete that request.",
+                generationOutcome: "error",
                 status: "error",
                 error: STREAM_INTERRUPTED_ERROR
               },
@@ -2004,6 +2009,7 @@ export default function App() {
                   reasoning: runState.reasoning,
                   rawStream: runState.raw,
                   streamSequence: runState.streamSequence,
+                  generationOutcome: "error",
                   status: "error",
                   error: STREAM_INTERRUPTED_ERROR
                 },

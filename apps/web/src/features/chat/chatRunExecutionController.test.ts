@@ -295,6 +295,7 @@ describe("chat run execution controller", () => {
         reasoning: "",
         rawStream: "partial text",
         streamSequence: 0,
+        generationOutcome: undefined,
         status: "streaming"
       }
     });

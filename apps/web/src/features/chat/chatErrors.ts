@@ -108,6 +108,7 @@ export function createCancelledAssistantPatch(
     streamSequence,
     hasStreamUi: parts.hasStreamUi,
     streamUiComplete: parts.streamUiComplete,
+    generationOutcome: "cancelled",
     status: "complete",
     error: undefined
   };

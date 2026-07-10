@@ -286,7 +286,7 @@ export function reduceGeneratedArtifactBatchPatch(
     return candidate;
   }
   if (resolvedPhase === "complete") {
-    return completeArtifactEditOperation(
+    const completed = completeArtifactEditOperation(
       candidate,
       operation,
       {
@@ -296,6 +296,12 @@ export function reduceGeneratedArtifactBatchPatch(
       },
       themeMode
     );
+    return {
+      ...completed,
+      generationOutcome: "complete",
+      status: "complete",
+      error: undefined
+    };
   }
   if (resolvedPhase === "error") {
     const serverEdit = getMatchingServerEdit(patch, operation);
@@ -320,6 +326,7 @@ export function reduceGeneratedArtifactBatchPatch(
         projection.sessionTitle
       ),
       activeArtifactEditId: operation.previousActiveEditId,
+      generationOutcome: "error",
       status: "error",
       error: errorMessage
     };
@@ -340,6 +347,7 @@ export function reduceGeneratedArtifactBatchPatch(
       operation,
       projection.sessionTitle
     ),
+    generationOutcome: "cancelled",
     status: "complete",
     error: undefined
   };
@@ -424,14 +432,15 @@ export function finalizePersistedGeneratedArtifactBatch(
   }
 
   const phase: ChatRunAssistantPhase =
-    message.status === "error"
+    message.generationOutcome ??
+    (message.status === "error"
       ? "error"
       : isChatCancelledMessage(message.content) ||
           isChatCancelledMessage(message.error)
         ? "cancelled"
         : !message.rawStream?.trim()
           ? "error"
-        : "complete";
+          : "complete");
   const patch =
     phase === "error" && !message.error?.trim()
       ? {

@@ -311,6 +311,7 @@ function completeBatch(
 
   return {
     ...patch,
+    generationOutcome: "complete",
     status: "complete",
     error: undefined,
     artifactEditBaseRawStream: message.artifactEditBaseRawStream,
@@ -353,6 +354,7 @@ function failBatch(
 
   return {
     ...patch,
+    generationOutcome: "error",
     status: "error",
     error: errorMessage,
     ...(rawStream === undefined ? {} : buildAssistantPresentationPatch(rawStream)),
@@ -375,6 +377,7 @@ function cancelBatch(
 
   return {
     ...patch,
+    generationOutcome: "cancelled",
     status: "complete",
     error: undefined,
     ...(rawStream === undefined ? {} : buildAssistantPresentationPatch(rawStream)),
@@ -419,7 +422,10 @@ export function finalizeGeneratedArtifactBatchPatch({
     return patch;
   }
 
-  if (status === "complete" && error === CHAT_RUN_CANCELLED_MESSAGE) {
+  if (
+    patch.generationOutcome === "cancelled" ||
+    (status === "complete" && error === CHAT_RUN_CANCELLED_MESSAGE)
+  ) {
     return cancelBatch(assistantMessage, patch, pending);
   }
 

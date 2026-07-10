@@ -234,7 +234,10 @@ describe("generated artifact batch model", () => {
       status: "streaming" as const
     };
     const { message, operation } = pendingMessage(
-      originalAssistant({ snapshot: staleSnapshot })
+      originalAssistant({
+        snapshot: staleSnapshot,
+        generationOutcome: "cancelled"
+      })
     );
     const completed = reduceGeneratedArtifactBatchPatch(
       { ...message, snapshot: staleSnapshot },
@@ -249,6 +252,9 @@ describe("generated artifact batch model", () => {
     assert.equal(completed.snapshot, undefined);
     assert.equal(completed.artifactContext, undefined);
     assert.equal(completed.runtimeErrors, undefined);
+    assert.equal(completed.generationOutcome, "complete");
+    assert.equal(completed.status, "complete");
+    assert.equal(completed.error, undefined);
     assert.equal(completed.artifactEdits?.[0].status, "complete");
     assert.equal(
       completed.artifactEdits?.[0].variants[0].rawStream,

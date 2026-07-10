@@ -323,6 +323,7 @@ export function createChatRunExecutionController(
         reasoning: state.reasoning,
         rawStream: state.raw,
         streamSequence: state.streamSequence,
+        generationOutcome: undefined,
         status: "streaming"
       },
       "streaming"

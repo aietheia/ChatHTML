@@ -52,6 +52,7 @@ type StoredMessage = {
   activeArtifactEditId?: string;
   generationRunId?: string;
   streamSequence?: number;
+  generationOutcome?: "complete" | "error" | "cancelled";
   status?: "streaming" | "complete" | "error";
   error?: string;
 };
@@ -136,6 +137,7 @@ export type SessionMessageInput = {
   activeArtifactEditId?: string;
   generationRunId?: string;
   streamSequence?: number;
+  generationOutcome?: "complete" | "error" | "cancelled";
   status?: "streaming" | "complete" | "error";
   error?: string;
 };
@@ -165,6 +167,7 @@ const SESSION_MESSAGE_PATCH_KEYS: Array<keyof SessionMessagePatch> = [
   "activeArtifactEditId",
   "generationRunId",
   "streamSequence",
+  "generationOutcome",
   "status",
   "error"
 ];
@@ -585,6 +588,12 @@ function normalizeMessage(input: unknown): StoredMessage | null {
       Number.isFinite(message.streamSequence)
         ? Math.max(0, Math.round(message.streamSequence))
         : undefined,
+    generationOutcome:
+      message.generationOutcome === "complete" ||
+      message.generationOutcome === "error" ||
+      message.generationOutcome === "cancelled"
+        ? message.generationOutcome
+        : undefined,
     status,
     error: stringValue(message.error) || undefined
   };
@@ -966,6 +975,12 @@ function shouldPreserveCurrentRunMessage(
 
   const currentSequence = current.streamSequence ?? -1;
   const incomingSequence = incoming.streamSequence ?? -1;
+  if (
+    current.generationOutcome &&
+    current.generationOutcome !== incoming.generationOutcome
+  ) {
+    return true;
+  }
   const incomingInterrupted =
     incoming.status === "error" && incoming.error === STREAM_INTERRUPTED_ERROR;
 

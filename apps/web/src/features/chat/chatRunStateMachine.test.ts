@@ -213,6 +213,30 @@ describe("chat run state machine", () => {
     assert.equal(result.assistantPatch?.streamSequence, 3);
   });
 
+  it("recognizes a durable server cancellation independently of display status", () => {
+    const result = reduceChatRunState(
+      createChatRunState({ runId: "run-1", raw: "partial" }),
+      {
+        type: "server",
+        message: assistant({
+          content: "Partial",
+          rawStream: "partial",
+          status: "complete",
+          generationOutcome: "cancelled"
+        })
+      }
+    );
+
+    assert.equal(result.accepted, true);
+    assert.equal(result.phase, "cancelled");
+    assert.equal(result.abortConnection, true);
+    assert.deepEqual(result.state.terminal, {
+      source: "server",
+      phase: "cancelled",
+      error: ""
+    });
+  });
+
   it("accepts an older server terminal without truncating newer local data", () => {
     const initial = createChatRunState({
       runId: "run-1",

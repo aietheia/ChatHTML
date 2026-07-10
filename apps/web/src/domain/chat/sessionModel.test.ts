@@ -144,6 +144,41 @@ describe("sessionModel", () => {
     assert.equal(message?.hasStreamUi, true);
   });
 
+  it("normalizes and serializes durable generation outcomes", () => {
+    const cancelled = normalizeStoredMessage({
+      id: "a1",
+      role: "assistant",
+      content: "Partial",
+      generationRunId: "run-1",
+      generationOutcome: "cancelled",
+      status: "complete"
+    });
+    const invalid = normalizeStoredMessage({
+      id: "a2",
+      role: "assistant",
+      content: "Done",
+      generationOutcome: "unknown",
+      status: "complete"
+    });
+    assert.equal(cancelled?.generationOutcome, "cancelled");
+    assert.equal(invalid?.generationOutcome, undefined);
+
+    const serialized = serializeSessions([
+      {
+        id: "s1",
+        title: "Saved",
+        createdAt: 1,
+        updatedAt: 1,
+        messages: [cancelled!],
+        files: []
+      }
+    ]);
+    assert.equal(
+      serialized[0].messages[0].generationOutcome,
+      "cancelled"
+    );
+  });
+
   it("lists streaming run ids for a single session", () => {
     const session: ChatSession = {
       id: "s1",

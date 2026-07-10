@@ -252,6 +252,87 @@ describe("server session merge", () => {
     );
   });
 
+  it("does not let a stale save erase a durable terminal generation outcome", () => {
+    const terminal = {
+      id: "a1",
+      role: "assistant" as const,
+      content: "Partial answer",
+      generationRunId: "run-1",
+      streamSequence: 5,
+      generationOutcome: "cancelled" as const,
+      status: "complete" as const
+    };
+    const stale = {
+      ...terminal,
+      content: "Stale local answer",
+      streamSequence: 99,
+      generationOutcome: undefined
+    };
+    const current = {
+      sessions: [session("active", 2, [terminal])],
+      activeSessionId: "active"
+    };
+    const incoming = {
+      sessions: [session("active", 3, [stale])],
+      activeSessionId: "active"
+    };
+
+    const merged = mergeClientSaveState(current, incoming);
+
+    assert.equal(merged.sessions[0].messages[0].content, "Partial answer");
+    assert.equal(
+      merged.sessions[0].messages[0].generationOutcome,
+      "cancelled"
+    );
+  });
+
+  it("allows matching terminal metadata updates and a newer run takeover", () => {
+    const terminal = {
+      id: "a1",
+      role: "assistant" as const,
+      content: "Partial answer",
+      generationRunId: "run-1",
+      streamSequence: 5,
+      generationOutcome: "cancelled" as const,
+      status: "complete" as const
+    };
+    const matching = {
+      ...terminal,
+      content: "Updated cancelled presentation"
+    };
+    const current = {
+      sessions: [session("active", 2, [terminal])],
+      activeSessionId: "active"
+    };
+    const matchingSave = mergeClientSaveState(current, {
+      sessions: [session("active", 3, [matching])],
+      activeSessionId: "active"
+    });
+    const nextRun = mergeClientSaveState(current, {
+      sessions: [
+        session("active", 4, [
+          {
+            ...terminal,
+            content: "",
+            generationRunId: "run-2",
+            streamSequence: 0,
+            generationOutcome: undefined,
+            status: "streaming" as const
+          }
+        ])
+      ],
+      activeSessionId: "active"
+    });
+
+    assert.equal(
+      matchingSave.sessions[0].messages[0].content,
+      "Updated cancelled presentation"
+    );
+    assert.equal(nextRun.sessions[0].messages[0].generationRunId, "run-2");
+    assert.equal(nextRun.sessions[0].messages[0].generationOutcome, undefined);
+    assert.equal(nextRun.sessions[0].messages[0].status, "streaming");
+  });
+
   it("keeps completed artifact edits when an older client save arrives later", () => {
     const current = {
       sessions: [

@@ -61,6 +61,7 @@ export function projectStreamingChatRun(
       ...(sessionTitle ? { sessionTitle } : {}),
       hasStreamUi: parts.hasStreamUi,
       streamUiComplete: parts.streamUiComplete,
+      generationOutcome: undefined,
       ...(typeof streamSequence === "number" ? { streamSequence } : {})
     },
     streamUiSource
@@ -91,6 +92,7 @@ export function projectCompletedChatRun(
       artifactContext,
       hasStreamUi: Boolean(streamUiSource),
       streamUiComplete: parts.streamUiComplete,
+      generationOutcome: "complete",
       status: "complete"
     },
     streamUiSource
@@ -110,6 +112,7 @@ export function projectFailedChatRun(
     reasoning: input.reasoning,
     rawStream: input.raw,
     streamSequence: input.streamSequence,
+    generationOutcome: "error",
     error: sanitizeChatErrorMessage(input.error),
     status: "error"
   };
