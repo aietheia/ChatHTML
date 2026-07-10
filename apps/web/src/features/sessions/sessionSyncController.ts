@@ -1,0 +1,135 @@
+import {
+  normalizeStoredSessionState,
+  type SessionState
+} from "../../domain/chat/sessionModel";
+import { requestSessions as requestSessionState } from "./sessionApi";
+import { loadLegacyLocalSessionState } from "./sessionPersistence";
+import {
+  mergePolledSessionState,
+  resolveInitialSessionState,
+  shouldRequestSessionSync
+} from "./sessionSyncPolicy";
+
+export type SessionStateUpdater = (
+  updater: (current: SessionState) => SessionState
+) => void;
+
+export type SessionSyncOutcome = "applied" | "cancelled" | "skipped";
+
+export type SessionSyncDependencies = {
+  requestSessions(clientId: string): Promise<Response>;
+  normalizeServerState(payload: unknown, now: number): SessionState;
+  loadLegacyState(): SessionState | null;
+  now(): number;
+};
+
+const defaultDependencies: SessionSyncDependencies = {
+  requestSessions: requestSessionState,
+  normalizeServerState: (payload, now) =>
+    normalizeStoredSessionState(payload, now, {
+      rebuildSnapshots: false,
+      interruptPendingArtifactEdits: true
+    }),
+  loadLegacyState: loadLegacyLocalSessionState,
+  now: Date.now
+};
+
+function resolveDependencies(
+  overrides?: Partial<SessionSyncDependencies>
+): SessionSyncDependencies {
+  return { ...defaultDependencies, ...overrides };
+}
+
+export type InitialSessionLoadInput = {
+  clientId: string;
+  isCancelled(): boolean;
+  updateState: SessionStateUpdater;
+  getDeletedSessionIds(): Iterable<string>;
+  getTransientEmptySessionId(): string | null;
+};
+
+export async function runInitialSessionLoad(
+  input: InitialSessionLoadInput,
+  dependencyOverrides?: Partial<SessionSyncDependencies>
+): Promise<SessionSyncOutcome> {
+  const dependencies = resolveDependencies(dependencyOverrides);
+  const response = await dependencies.requestSessions(input.clientId);
+  if (!response.ok) {
+    throw new Error(`Session load failed with HTTP ${response.status}.`);
+  }
+
+  const payload = await response.json();
+  if (input.isCancelled()) {
+    return "cancelled";
+  }
+
+  const serverState = dependencies.normalizeServerState(
+    payload,
+    dependencies.now()
+  );
+  const legacyState = dependencies.loadLegacyState();
+  input.updateState((current) =>
+    resolveInitialSessionState({
+      current,
+      serverState,
+      legacyState,
+      deletedSessionIds: input.getDeletedSessionIds(),
+      transientEmptySessionId: input.getTransientEmptySessionId()
+    })
+  );
+
+  return "applied";
+}
+
+export type PollSessionStateInput = {
+  clientId: string;
+  isCancelled(): boolean;
+  getState(): SessionState;
+  updateState: SessionStateUpdater;
+  getDeletedSessionIds(): Iterable<string>;
+  getTransientEmptySessionId(): string | null;
+  hasActiveRuns(): boolean;
+  hasRecentCancellations(): boolean;
+};
+
+export async function runSessionPoll(
+  input: PollSessionStateInput,
+  dependencyOverrides?: Partial<SessionSyncDependencies>
+): Promise<SessionSyncOutcome> {
+  const currentState = input.getState();
+  if (
+    !shouldRequestSessionSync({
+      state: currentState,
+      transientEmptySessionId: input.getTransientEmptySessionId(),
+      hasActiveRuns: input.hasActiveRuns(),
+      hasRecentCancellations: input.hasRecentCancellations()
+    })
+  ) {
+    return "skipped";
+  }
+
+  const dependencies = resolveDependencies(dependencyOverrides);
+  const response = await dependencies.requestSessions(input.clientId);
+  if (!response.ok) {
+    throw new Error(`Session sync failed with HTTP ${response.status}.`);
+  }
+
+  const serverState = dependencies.normalizeServerState(
+    await response.json(),
+    dependencies.now()
+  );
+  if (input.isCancelled()) {
+    return "cancelled";
+  }
+
+  input.updateState((current) =>
+    mergePolledSessionState({
+      current,
+      serverState,
+      clientId: input.clientId,
+      deletedSessionIds: input.getDeletedSessionIds()
+    })
+  );
+
+  return "applied";
+}

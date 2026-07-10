@@ -131,4 +131,19 @@ describe("session API", () => {
     assert.equal(beaconCalls[0].url, "/api/sessions");
     assert.ok(beaconCalls[0].data instanceof Blob);
   });
+
+  it("falls back to a keepalive PUT when the exit beacon declines", () => {
+    const fallback = mockFetch(new Response(null, { status: 204 }));
+
+    saveSessionStateOnPageExit("{\"sessions\":[]}", "client-1", {
+      fetch: fallback.fetchImpl,
+      sendBeacon: () => false
+    });
+
+    assert.equal(fallback.calls.length, 1);
+    assert.equal(fallback.calls[0].input, "/api/sessions");
+    assert.equal(fallback.calls[0].init?.method, "PUT");
+    assert.equal(fallback.calls[0].init?.keepalive, true);
+    assert.equal(fallback.calls[0].init?.body, "{\"sessions\":[]}");
+  });
 });

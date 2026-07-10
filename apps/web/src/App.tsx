@@ -132,19 +132,14 @@ import {
   deleteSessionFile,
   requestSessionIndex,
   requestSessions,
-  saveSerializedSessionState,
-  saveSessionStateOnPageExit,
   uploadSessionFile,
   type SessionFileUploadInput
 } from "./features/sessions/sessionApi";
 import {
-  clearLegacyLocalSessions,
   loadCachedSessionListPreview,
-  loadLegacyLocalSessionState,
   loadSessionClientId,
   normalizeSessionListPreview,
   saveCachedSessionListPreview,
-  serializeSessionStateForSave,
   sessionListPreviewFromState,
   type SessionListPreview
 } from "./features/sessions/sessionPersistence";
@@ -153,11 +148,8 @@ import {
   findSessionMessage,
   mergeSessionFiles
 } from "./features/sessions/sessionSelectors";
-import {
-  mergePolledSessionState,
-  resolveInitialSessionState,
-  shouldRequestSessionSync
-} from "./features/sessions/sessionSyncPolicy";
+import { useSessionSync } from "./features/sessions/useSessionSync";
+import { useSessionSave } from "./features/sessions/useSessionSave";
 import {
   getArtifactEditActiveVariant,
   getArtifactEditCompleteRawStream,
@@ -242,6 +234,7 @@ type BranchRunCancelCleanup = {
 
 const THEME_STORAGE_KEY = "streamui.theme.v1";
 const SESSION_SYNC_INTERVAL_MS = 4_000;
+const SESSION_SAVE_DEBOUNCE_MS = 350;
 
 function coerceApiSettingsForRuntime(
   settings: ApiSettings,
@@ -640,8 +633,6 @@ export default function App() {
   const isSendingRef = useRef(isSending);
   const artifactSelectionsRef = useRef<ArtifactSelection[]>([]);
   const sessionsLoadedRef = useRef(sessionsLoaded);
-  const saveAbortRef = useRef<AbortController | null>(null);
-  const lastSavedSessionPayloadRef = useRef<string | null>(null);
   const lastSessionListPreviewPayloadRef = useRef<string | null>(
     sessionListPreview ? JSON.stringify(sessionListPreview) : null
   );
@@ -940,120 +931,19 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return undefined;
-    }
-
-    let cancelled = false;
-
-    requestSessions(sessionClientIdRef.current)
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`Session load failed with HTTP ${response.status}.`);
-        }
-        return response.json() as Promise<unknown>;
-      })
-      .then((data) => {
-        if (!cancelled) {
-          const serverState = normalizeStoredSessionState(data, Date.now(), {
-            rebuildSnapshots: false,
-            interruptPendingArtifactEdits: true
-          });
-          const legacyState = loadLegacyLocalSessionState();
-
-          setSessionStateAndRef((current) =>
-            resolveInitialSessionState({
-              current,
-              serverState,
-              legacyState,
-              deletedSessionIds: deletedSessionIdsRef.current,
-              transientEmptySessionId: transientEmptySessionIdRef.current
-            })
-          );
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          console.warn("Could not load ChatHTML sessions.", error);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          sessionsLoadedRef.current = true;
-          setSessionsLoaded(true);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [setSessionStateAndRef]);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !sessionsLoaded) {
-      return undefined;
-    }
-
-    let cancelled = false;
-
-    const syncSessions = async () => {
-      const currentState = sessionStateRef.current;
-      if (
-        !shouldRequestSessionSync({
-          state: currentState,
-          transientEmptySessionId: transientEmptySessionIdRef.current,
-          hasActiveRuns: runConnectionsRef.current.size > 0,
-          hasRecentCancellations: cancelledRunIdsRef.current.size > 0
-        })
-      ) {
-        return;
-      }
-
-      try {
-        const response = await requestSessions(sessionClientIdRef.current);
-        if (!response.ok) {
-          throw new Error(`Session sync failed with HTTP ${response.status}.`);
-        }
-
-        const serverState = normalizeStoredSessionState(
-          await response.json(),
-          Date.now(),
-          {
-            rebuildSnapshots: false,
-            interruptPendingArtifactEdits: true
-          }
-        );
-        if (cancelled) {
-          return;
-        }
-
-        setSessionStateAndRef((current) =>
-          mergePolledSessionState({
-            current,
-            serverState,
-            clientId: sessionClientIdRef.current,
-            deletedSessionIds: deletedSessionIdsRef.current
-          })
-        );
-      } catch (error) {
-        if (!cancelled) {
-          console.warn("Could not sync ChatHTML sessions.", error);
-        }
-      }
-    };
-
-    const intervalId = window.setInterval(
-      () => void syncSessions(),
-      SESSION_SYNC_INTERVAL_MS
-    );
-    void syncSessions();
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [sessionsLoaded, setSessionStateAndRef]);
+  useSessionSync({
+    sessionsLoaded,
+    intervalMs: SESSION_SYNC_INTERVAL_MS,
+    sessionClientIdRef,
+    sessionStateRef,
+    sessionsLoadedRef,
+    deletedSessionIdsRef,
+    transientEmptySessionIdRef,
+    runConnectionsRef,
+    cancelledRunIdsRef,
+    updateState: setSessionStateAndRef,
+    setSessionsLoaded
+  });
 
   useEffect(() => {
     if (typeof window === "undefined" || !sessionsLoaded) {
@@ -1075,120 +965,15 @@ export default function App() {
     return () => window.clearInterval(intervalId);
   }, [sessionsLoaded, setSessionStateAndRef]);
 
-  useEffect(() => {
-    if (typeof window === "undefined" || !sessionsLoaded) {
-      return undefined;
-    }
-
-    const controller = new AbortController();
-    saveAbortRef.current?.abort();
-    saveAbortRef.current = controller;
-    const serializedState = serializeSessionStateForSave(
-      sessionState,
-      sessionClientIdRef.current,
-      Array.from(deletedSessionIdsRef.current)
-    );
-    if (serializedState === lastSavedSessionPayloadRef.current) {
-      return undefined;
-    }
-
-    const timeout = window.setTimeout(() => {
-      saveSerializedSessionState(
-        serializedState,
-        sessionClientIdRef.current,
-        controller.signal
-      )
-        .then((response) => {
-          if (!response.ok) {
-            throw new Error(`Session save failed with HTTP ${response.status}.`);
-          }
-
-          lastSavedSessionPayloadRef.current = serializedState;
-          clearLegacyLocalSessions();
-        })
-        .catch((error) => {
-          if ((error as { name?: unknown }).name !== "AbortError") {
-            console.warn("Could not save ChatHTML sessions.", error);
-          }
-        });
-    }, 350);
-
-    return () => {
-      window.clearTimeout(timeout);
-      controller.abort();
-    };
-  }, [sessionState, sessionsLoaded]);
-
-  const saveCurrentSessionStateNow = useCallback(() => {
-    if (typeof window === "undefined" || !sessionsLoadedRef.current) {
-      return;
-    }
-
-    const serializedState = serializeSessionStateForSave(
-      sessionStateRef.current,
-      sessionClientIdRef.current,
-      Array.from(deletedSessionIdsRef.current)
-    );
-    if (serializedState === lastSavedSessionPayloadRef.current) {
-      return;
-    }
-
-    void saveSerializedSessionState(
-      serializedState,
-      sessionClientIdRef.current
-    )
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`Session save failed with HTTP ${response.status}.`);
-        }
-
-        lastSavedSessionPayloadRef.current = serializedState;
-        clearLegacyLocalSessions();
-      })
-      .catch((error) => {
-        console.warn("Could not save ChatHTML sessions.", error);
-      });
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return undefined;
-    }
-
-    const flushSessions = () => {
-      if (!sessionsLoadedRef.current) {
-        return;
-      }
-
-      const serializedState = serializeSessionStateForSave(
-        sessionStateRef.current,
-        sessionClientIdRef.current,
-        Array.from(deletedSessionIdsRef.current)
-      );
-      if (serializedState === lastSavedSessionPayloadRef.current) {
-        return;
-      }
-
-      lastSavedSessionPayloadRef.current = serializedState;
-      saveSessionStateOnPageExit(serializedState, sessionClientIdRef.current);
-    };
-
-    const flushWhenHidden = () => {
-      if (document.visibilityState === "hidden") {
-        flushSessions();
-      }
-    };
-
-    window.addEventListener("pagehide", flushSessions);
-    window.addEventListener("beforeunload", flushSessions);
-    document.addEventListener("visibilitychange", flushWhenHidden);
-
-    return () => {
-      window.removeEventListener("pagehide", flushSessions);
-      window.removeEventListener("beforeunload", flushSessions);
-      document.removeEventListener("visibilitychange", flushWhenHidden);
-    };
-  }, []);
+  const saveCurrentSessionStateNow = useSessionSave({
+    sessionState,
+    sessionsLoaded,
+    debounceMs: SESSION_SAVE_DEBOUNCE_MS,
+    sessionStateRef,
+    sessionsLoadedRef,
+    sessionClientIdRef,
+    deletedSessionIdsRef
+  });
 
   const updateActiveSession = useCallback(
     (updater: (session: ChatSession) => ChatSession) => {
