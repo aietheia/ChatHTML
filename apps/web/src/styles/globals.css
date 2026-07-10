@@ -2648,6 +2648,19 @@ button {
   color: #a1a1aa;
 }
 
+.app-shell[data-theme="night"] .artifact-edit-selection-popover {
+  --artifact-selection-popover-bg: #303033;
+  --artifact-selection-popover-border: rgba(51, 156, 255, 0.3);
+  color: #f4f4f5;
+  box-shadow:
+    0 14px 36px rgba(0, 0, 0, 0.34),
+    0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.app-shell[data-theme="night"] .artifact-edit-selection-item + .artifact-edit-selection-item {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
 .app-shell[data-theme="night"] .artifact-edit-discard-button {
   color: #f4f4f5;
   background: rgba(255, 255, 255, 0.08);
@@ -3122,6 +3135,115 @@ button {
   font-size: 11px;
   font-weight: 700;
   line-height: 1;
+}
+
+.artifact-edit-selection-summary {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.artifact-edit-selection-trigger {
+  display: inline;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: #339CFF;
+  background: transparent;
+  font: inherit;
+  font-weight: 760;
+  line-height: inherit;
+  cursor: help;
+}
+
+.artifact-edit-selection-trigger:focus-visible {
+  outline: 2px solid rgba(51, 156, 255, 0.42);
+  outline-offset: 3px;
+}
+
+.artifact-edit-selection-popover {
+  --artifact-selection-popover-bg: rgba(255, 255, 255, 0.98);
+  --artifact-selection-popover-border: rgba(51, 156, 255, 0.2);
+  position: absolute;
+  right: -10px;
+  bottom: calc(100% + 11px);
+  z-index: 8;
+  display: grid;
+  width: max-content;
+  min-width: 150px;
+  max-width: min(270px, calc(100vw - 40px));
+  overflow: visible;
+  padding: 7px 9px;
+  border: 1px solid var(--artifact-selection-popover-border);
+  border-radius: 16px 16px 6px 16px;
+  color: #27272a;
+  background: var(--artifact-selection-popover-bg);
+  box-shadow:
+    0 14px 36px rgba(24, 24, 27, 0.16),
+    0 0 0 1px rgba(255, 255, 255, 0.48);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(6px) scale(0.96);
+  transform-origin: right bottom;
+  transition:
+    opacity 160ms ease,
+    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    visibility 0s linear 220ms;
+}
+
+.artifact-edit-selection-popover::after {
+  content: "";
+  position: absolute;
+  right: 13px;
+  bottom: -6px;
+  width: 12px;
+  height: 12px;
+  border-right: 1px solid var(--artifact-selection-popover-border);
+  border-bottom: 1px solid var(--artifact-selection-popover-border);
+  border-radius: 0 0 3px 0;
+  background: var(--artifact-selection-popover-bg);
+  transform: rotate(45deg);
+}
+
+.artifact-edit-selection-summary:hover .artifact-edit-selection-popover,
+.artifact-edit-selection-summary:focus-within .artifact-edit-selection-popover {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+  transition-delay: 0s;
+}
+
+.artifact-edit-selection-item {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 6px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding: 5px 2px;
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1.2;
+}
+
+.artifact-edit-selection-item + .artifact-edit-selection-item {
+  border-top: 1px solid rgba(24, 24, 27, 0.08);
+}
+
+.artifact-edit-selection-item > span:first-child {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: #339CFF;
+}
+
+.artifact-edit-selection-item > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .artifact-edit-loading-spinner {
@@ -5393,6 +5515,10 @@ button {
 
 @media (prefers-reduced-motion: reduce) {
   .artifact-floating-edit-action {
+    transition: none;
+  }
+
+  .artifact-edit-selection-popover {
     transition: none;
   }
 }

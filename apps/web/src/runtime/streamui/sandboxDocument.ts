@@ -214,6 +214,26 @@ export function buildIframeDocument(
     body[data-streamui-selection-mode="true"] {
       cursor: crosshair;
     }
+    :root[data-page-theme="day"] {
+      --streamui-edit-fill: rgba(51, 156, 255, 0.1);
+      --streamui-edit-fill-selected: rgba(51, 156, 255, 0.16);
+      --streamui-edit-fill-busy: rgba(51, 156, 255, 0.14);
+      --streamui-edit-outline: #339CFF;
+      --streamui-edit-outline-outer: rgba(24, 24, 27, 0.2);
+      --streamui-edit-shadow: rgba(51, 156, 255, 0.2);
+      --streamui-edit-sheen: rgba(255, 255, 255, 0.88);
+      --streamui-edit-sheen-soft: rgba(51, 156, 255, 0.28);
+    }
+    :root[data-page-theme="night"] {
+      --streamui-edit-fill: rgba(51, 156, 255, 0.14);
+      --streamui-edit-fill-selected: rgba(51, 156, 255, 0.2);
+      --streamui-edit-fill-busy: rgba(51, 156, 255, 0.18);
+      --streamui-edit-outline: #339CFF;
+      --streamui-edit-outline-outer: rgba(255, 255, 255, 0.14);
+      --streamui-edit-shadow: rgba(51, 156, 255, 0.24);
+      --streamui-edit-sheen: rgba(255, 255, 255, 0.8);
+      --streamui-edit-sheen-soft: rgba(51, 156, 255, 0.32);
+    }
     .streamui-selection-hover,
     .streamui-selection-selected,
     .streamui-selection-busy {
@@ -221,98 +241,53 @@ export function buildIframeDocument(
       z-index: 2147483645;
       display: none;
       pointer-events: none;
-      border-radius: 6px;
+      border-radius: 8px;
       box-shadow:
-        inset 0 0 0 2px rgba(37, 99, 235, 0.96),
-        0 0 0 1px rgba(255, 255, 255, 0.75);
-      background: rgba(37, 99, 235, 0.08);
+        inset 0 0 0 2px var(--streamui-edit-outline),
+        0 0 0 1px var(--streamui-edit-outline-outer),
+        0 8px 24px var(--streamui-edit-shadow);
+      background: var(--streamui-edit-fill);
     }
     .streamui-selection-selected {
       z-index: 2147483644;
-      box-shadow:
-        inset 0 0 0 2px rgba(22, 163, 74, 0.96),
-        0 0 0 1px rgba(255, 255, 255, 0.75);
-      background: rgba(22, 163, 74, 0.1);
+      background: var(--streamui-edit-fill-selected);
     }
     .streamui-selection-busy {
       z-index: 2147483643;
+      isolation: isolate;
       overflow: hidden;
-      border-radius: 8px;
-      box-shadow:
-        inset 0 0 0 2px rgba(37, 99, 235, 0.88),
-        0 0 0 1px rgba(255, 255, 255, 0.82),
-        0 14px 34px rgba(37, 99, 235, 0.18);
-      background: rgba(37, 99, 235, 0.2);
-      backdrop-filter: blur(3px) saturate(0.72);
+      border-radius: 10px;
+      background: var(--streamui-edit-fill-busy);
     }
     .streamui-selection-busy::before {
       content: "";
       position: absolute;
-      inset: 0;
-      background:
-        linear-gradient(135deg, rgba(255, 255, 255, 0.32), transparent 42%),
-        repeating-linear-gradient(
-          135deg,
-          rgba(37, 99, 235, 0.24) 0,
-          rgba(37, 99, 235, 0.24) 8px,
-          rgba(147, 197, 253, 0.22) 8px,
-          rgba(147, 197, 253, 0.22) 16px
-        );
-      opacity: 0.62;
-      animation: streamui-selection-busy-sheen 980ms linear infinite;
-    }
-    .streamui-selection-busy::after {
-      content: "";
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      width: 26px;
-      height: 26px;
-      margin-left: -13px;
-      margin-top: -13px;
-      border: 3px solid rgba(255, 255, 255, 0.72);
-      border-top-color: #2563eb;
-      border-radius: 999px;
-      background: transparent;
-      box-shadow: 0 8px 22px rgba(24, 24, 27, 0.24);
-      animation: streamui-selection-busy-spin 780ms linear infinite;
-    }
-    .streamui-selection-busy .streamui-selection-label {
-      display: none;
-    }
-    @keyframes streamui-selection-busy-spin {
-      to {
-        transform: rotate(360deg);
-      }
+      inset: -80%;
+      background: linear-gradient(
+        135deg,
+        transparent 43%,
+        var(--streamui-edit-sheen-soft) 47%,
+        var(--streamui-edit-sheen) 50%,
+        var(--streamui-edit-sheen-soft) 53%,
+        transparent 57%
+      );
+      transform: translate3d(-34%, -34%, 0);
+      will-change: transform;
+      animation: streamui-selection-busy-sheen 1800ms ease-in-out infinite;
     }
     @keyframes streamui-selection-busy-sheen {
-      from {
-        background-position: 0 0, 0 0;
+      0%, 12% {
+        transform: translate3d(-34%, -34%, 0);
       }
-      to {
-        background-position: 0 0, 22px 22px;
+      82%, 100% {
+        transform: translate3d(34%, 34%, 0);
       }
     }
-    .streamui-selection-label {
-      position: absolute;
-      left: 0;
-      bottom: calc(100% + 4px);
-      max-width: min(320px, 90vw);
-      overflow: hidden;
-      padding: 3px 7px;
-      border-radius: 6px;
-      color: #ffffff;
-      background: #2563eb;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 11px;
-      font-weight: 720;
-      line-height: 1.3;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      box-shadow: 0 8px 22px rgba(24, 24, 27, 0.18);
-    }
-    .streamui-selection-selected .streamui-selection-label {
-      background: #16a34a;
+    @media (prefers-reduced-motion: reduce) {
+      .streamui-selection-busy::before {
+        animation: none;
+        transform: translate3d(0, 0, 0);
+      }
     }
     .streamui-text-selection-toolbar {
       position: fixed;
@@ -397,6 +372,49 @@ export function buildIframeDocument(
           }, "*");
         } catch {}
       };
+      const canScrollInDirection = (element, deltaY, requireScrollableStyle) => {
+        if (!(element instanceof Element)) {
+          return false;
+        }
+
+        if (requireScrollableStyle) {
+          const overflowY = getComputedStyle(element).overflowY;
+          if (!/^(auto|scroll|overlay)$/.test(overflowY)) {
+            return false;
+          }
+        }
+
+        const maxScrollTop = element.scrollHeight - element.clientHeight;
+        if (maxScrollTop <= 1) {
+          return false;
+        }
+
+        return deltaY < 0
+          ? element.scrollTop > 1
+          : element.scrollTop < maxScrollTop - 1;
+      };
+      const canPreviewConsumeWheel = (target, deltaY) => {
+        let element = target instanceof Element ? target : target?.parentElement;
+        while (element && element !== document.documentElement) {
+          if (canScrollInDirection(element, deltaY, true)) {
+            return true;
+          }
+          element = element.parentElement;
+        }
+
+        return canScrollInDirection(document.scrollingElement, deltaY, false);
+      };
+      document.addEventListener("wheel", (event) => {
+        const deltaY = Number(event.deltaY) || 0;
+        if (!deltaY || event.ctrlKey || canPreviewConsumeWheel(event.target, deltaY)) {
+          return;
+        }
+
+        post("wheel", "wheel", {
+          deltaY,
+          deltaMode: event.deltaMode
+        });
+      }, { passive: true });
       const MATHJAX_SCRIPT_SRC = "${MATHJAX_SCRIPT_SRC}";
       window.MathJax = {
         tex: {
@@ -1146,29 +1164,6 @@ export function buildIframeDocument(
           "";
         return truncateSelectionText(accessibleText, MAX_SELECTION_PREVIEW_CHARS);
       };
-      const getElementDisplayLabel = (element) => {
-        const preview = getElementPreview(element);
-        if (preview && !isDomLikeSelectionLabel(preview)) {
-          return preview;
-        }
-
-        return (
-          getSelectionPreviewFromHtml(element.outerHTML || "") ||
-          preview ||
-          getElementLabel(element)
-        );
-      };
-      const getSelectionTargetLabel = (target, element) => {
-        const preview = truncateSelectionText(
-          target?.preview || target?.label || "",
-          120
-        );
-        if (preview) {
-          return preview;
-        }
-
-        return getElementDisplayLabel(element);
-      };
       const resolveSelectedTarget = (target) => {
         if (!target || typeof target.selector !== "string") {
           return null;
@@ -1195,13 +1190,10 @@ export function buildIframeDocument(
 
         const overlay = document.createElement("div");
         overlay.className = className;
-        const label = document.createElement("span");
-        label.className = "streamui-selection-label";
-        overlay.appendChild(label);
         document.body.appendChild(overlay);
         return overlay;
       };
-      const placeSelectionOverlay = (overlay, element, labelText) => {
+      const placeSelectionOverlay = (overlay, element) => {
         if (!overlay || !(element instanceof Element)) {
           return;
         }
@@ -1228,10 +1220,6 @@ export function buildIframeDocument(
           Math.max(1, Math.min(rect.width, window.innerWidth - left)) + "px";
         overlay.style.height =
           Math.max(1, Math.min(rect.height, window.innerHeight - top)) + "px";
-        const label = overlay.querySelector(".streamui-selection-label");
-        if (label) {
-          label.textContent = labelText || getElementLabel(element);
-        }
       };
       const hideSelectionHover = () => {
         selectionHoverTarget = null;
@@ -1249,11 +1237,7 @@ export function buildIframeDocument(
         if (!hoverOverlay) {
           hoverOverlay = createSelectionOverlay("streamui-selection-hover");
         }
-        placeSelectionOverlay(
-          hoverOverlay,
-          element,
-          getElementDisplayLabel(element)
-        );
+        placeSelectionOverlay(hoverOverlay, element);
       };
       const renderSelectedSelectionTargets = () => {
         if (!document.body) {
@@ -1278,11 +1262,7 @@ export function buildIframeDocument(
             return;
           }
           selectedOverlayLayer.appendChild(overlay);
-          placeSelectionOverlay(
-            overlay,
-            element,
-            getSelectionTargetLabel(target, element)
-          );
+          placeSelectionOverlay(overlay, element);
         });
       };
       const renderBusySelectionTargets = () => {
@@ -1308,7 +1288,7 @@ export function buildIframeDocument(
             return;
           }
           busyOverlayLayer.appendChild(overlay);
-          placeSelectionOverlay(overlay, element, "Editing");
+          placeSelectionOverlay(overlay, element);
         });
       };
       const createSelectionPayload = (kind, element, selectedText = "") => {

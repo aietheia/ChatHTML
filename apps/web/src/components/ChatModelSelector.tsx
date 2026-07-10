@@ -7,9 +7,8 @@ import {
 } from "react";
 import { Check, ChevronDown, ChevronRight, Search } from "lucide-react";
 import {
-  UI_COMPLEXITY_MAX,
-  UI_COMPLEXITY_MIN,
-  normalizeUiComplexity,
+  UI_COMPLEXITY_LEVEL_OPTIONS,
+  getUiComplexityLevel,
   type ReasoningEffort
 } from "../core/apiSettings";
 
@@ -35,6 +34,7 @@ const REASONING_OPTIONS: Array<{
 ];
 
 const REASONING_MAX_INDEX = REASONING_OPTIONS.length - 1;
+const UI_COMPLEXITY_MAX_INDEX = UI_COMPLEXITY_LEVEL_OPTIONS.length - 1;
 
 function getDisplayModelName(model: string): string {
   const trimmed = model.trim();
@@ -57,13 +57,13 @@ function getReasoningIndex(reasoningEffort: ReasoningEffort): number {
   return index >= 0 ? index : 0;
 }
 
-function clampSliderIndex(value: string): number {
+function clampSliderIndex(value: string, maxIndex: number): number {
   const index = Number.parseInt(value, 10);
   if (!Number.isFinite(index)) {
     return 0;
   }
 
-  return Math.min(REASONING_MAX_INDEX, Math.max(0, index));
+  return Math.min(maxIndex, Math.max(0, index));
 }
 
 function getSliderStyle(value: number, min: number, max: number): CSSProperties {
@@ -97,11 +97,11 @@ export function ChatModelSelector({
   const normalizedQuery = query.trim().toLowerCase();
   const reasoningLabel = getReasoningLabel(reasoningEffort);
   const reasoningIndex = getReasoningIndex(reasoningEffort);
-  const normalizedUiComplexity = normalizeUiComplexity(uiComplexity);
-  const parameterLabel = [
-    reasoningLabel,
-    `UI ${normalizedUiComplexity}`
-  ].filter(Boolean).join(" · ");
+  const uiComplexityLevel = getUiComplexityLevel(uiComplexity);
+  const uiComplexityIndex = UI_COMPLEXITY_LEVEL_OPTIONS.indexOf(uiComplexityLevel);
+  const parameterLabel = [reasoningLabel, `UI ${uiComplexityLevel.label}`]
+    .filter(Boolean)
+    .join(" · ");
   const filteredModels = useMemo(() => {
     if (!normalizedQuery) {
       return modelOptions;
@@ -236,7 +236,10 @@ export function ChatModelSelector({
                   aria-label="Reasoning level"
                   aria-valuetext={reasoningLabel || "Off"}
                   onChange={(event) => {
-                    const nextIndex = clampSliderIndex(event.target.value);
+                    const nextIndex = clampSliderIndex(
+                      event.target.value,
+                      REASONING_MAX_INDEX
+                    );
                     onReasoningEffortChange(REASONING_OPTIONS[nextIndex].value);
                   }}
                 />
@@ -248,35 +251,35 @@ export function ChatModelSelector({
             <div className="chat-model-slider-block is-ui">
               <div className="chat-model-slider-header">
                 <span>UI</span>
-                <strong>{normalizedUiComplexity}</strong>
+                <strong>{uiComplexityLevel.label}</strong>
               </div>
               <div
                 className="chat-model-slider-wrap"
-                style={getSliderStyle(
-                  normalizedUiComplexity,
-                  UI_COMPLEXITY_MIN,
-                  UI_COMPLEXITY_MAX
-                )}
+                style={getSliderStyle(uiComplexityIndex, 0, UI_COMPLEXITY_MAX_INDEX)}
               >
                 <div className="chat-model-slider-ticks is-compact" aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
-                  <span />
-                  <span />
+                  {UI_COMPLEXITY_LEVEL_OPTIONS.map((option) => (
+                    <span key={option.label} />
+                  ))}
                 </div>
                 <input
                   className="chat-model-slider"
                   type="range"
-                  min={UI_COMPLEXITY_MIN}
-                  max={UI_COMPLEXITY_MAX}
+                  min={0}
+                  max={UI_COMPLEXITY_MAX_INDEX}
                   step={1}
-                  value={normalizedUiComplexity}
+                  value={uiComplexityIndex}
                   aria-label="UI complexity"
-                  aria-valuetext={`${normalizedUiComplexity} out of 100`}
-                  onChange={(event) =>
-                    onUiComplexityChange(normalizeUiComplexity(event.target.value))
-                  }
+                  aria-valuetext={uiComplexityLevel.label}
+                  onChange={(event) => {
+                    const nextIndex = clampSliderIndex(
+                      event.target.value,
+                      UI_COMPLEXITY_MAX_INDEX
+                    );
+                    onUiComplexityChange(
+                      UI_COMPLEXITY_LEVEL_OPTIONS[nextIndex].value
+                    );
+                  }}
                 />
                 <span className="chat-model-slider-thumb" aria-hidden="true">
                   <span />

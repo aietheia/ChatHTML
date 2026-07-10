@@ -61,6 +61,13 @@ export const MAX_MEMORY_ITEM_TEXT_LENGTH = 800;
 export const UI_COMPLEXITY_MIN = 0;
 export const UI_COMPLEXITY_MAX = 100;
 export const DEFAULT_UI_COMPLEXITY = 50;
+export const UI_COMPLEXITY_LEVEL_OPTIONS = [
+  { value: 10, max: 20, label: "Minimal" },
+  { value: 30, max: 40, label: "Simple" },
+  { value: 50, max: 65, label: "Balanced" },
+  { value: 75, max: 85, label: "Rich" },
+  { value: 90, max: 100, label: "Elaborate" }
+] as const;
 
 export const REQUIRED_MODEL_OPTIONS = [
   "openai/gpt-5.5",
@@ -182,6 +189,15 @@ export function normalizeUiComplexity(
   return Math.min(
     UI_COMPLEXITY_MAX,
     Math.max(UI_COMPLEXITY_MIN, Math.round(numericValue))
+  );
+}
+
+export function getUiComplexityLevel(value: unknown) {
+  const normalized = normalizeUiComplexity(value);
+
+  return (
+    UI_COMPLEXITY_LEVEL_OPTIONS.find((option) => normalized <= option.max) ??
+    UI_COMPLEXITY_LEVEL_OPTIONS[UI_COMPLEXITY_LEVEL_OPTIONS.length - 1]
   );
 }
 

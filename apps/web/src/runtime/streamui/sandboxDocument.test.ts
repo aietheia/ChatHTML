@@ -88,6 +88,29 @@ describe("sandboxDocument", () => {
     assert.match(document, /legacyIdSelector/);
   });
 
+  it("renders accented edit overlays with a diagonal busy sheen", () => {
+    const document = buildIframeDocument("<button>Edit me</button>");
+
+    assert.match(document, /--streamui-edit-outline/);
+    assert.match(document, /#339CFF/);
+    assert.match(document, /--streamui-edit-fill-selected/);
+    assert.match(document, /linear-gradient\(\s*135deg/);
+    assert.match(document, /translate3d\(-34%, -34%, 0\)/);
+    assert.match(document, /translate3d\(34%, 34%, 0\)/);
+    assert.doesNotMatch(document, /streamui-selection-busy-spin/);
+    assert.doesNotMatch(document, /streamui-selection-label/);
+    assert.doesNotMatch(document, /rgba\(37, 99, 235/);
+  });
+
+  it("forwards wheel input when the preview cannot scroll further", () => {
+    const document = buildIframeDocument("<div>Scrollable content</div>");
+
+    assert.match(document, /canPreviewConsumeWheel/);
+    assert.match(document, /canScrollInDirection/);
+    assert.match(document, /post\("wheel", "wheel"/);
+    assert.match(document, /event\.ctrlKey/);
+  });
+
   it("includes the local capability action bridge", () => {
     const document = buildIframeDocument(
       '<button data-streamui-copy-target="#code">Copy</button><code id="code">x</code>'

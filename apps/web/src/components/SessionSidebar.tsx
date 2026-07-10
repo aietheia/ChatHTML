@@ -26,8 +26,7 @@ import {
 import {
   API_KEY_SOURCE_OPTIONS,
   API_PROVIDER_PRESETS,
-  UI_COMPLEXITY_MAX,
-  UI_COMPLEXITY_MIN,
+  UI_COMPLEXITY_LEVEL_OPTIONS,
   MAX_MEMORY_ITEMS,
   MAX_MEMORY_ITEM_TEXT_LENGTH,
   MAX_USER_PREFERENCE_PROMPT_LENGTH,
@@ -37,6 +36,7 @@ import {
   getDefaultModelsEndpoint,
   getProviderPreset,
   getApiKeyEnvironmentName,
+  getUiComplexityLevel,
   getSelectableModelOptions,
   hasCompleteApiSettings,
   isRequiredModelOption,
@@ -1134,23 +1134,20 @@ export function SessionSidebar({
 
                     <label className="settings-row">
                       <span>UI complexity</span>
-                      <div className="settings-slider-control">
-                        <input
-                          type="range"
-                          min={UI_COMPLEXITY_MIN}
-                          max={UI_COMPLEXITY_MAX}
-                          step={1}
-                          value={draftApiSettings.uiComplexity}
-                          onChange={(event) =>
-                            updateApiDraft({
-                              uiComplexity: normalizeUiComplexity(
-                                event.target.value
-                              )
-                            })
-                          }
-                        />
-                        <output>{draftApiSettings.uiComplexity}</output>
-                      </div>
+                      <select
+                        value={getUiComplexityLevel(draftApiSettings.uiComplexity).value}
+                        onChange={(event) =>
+                          updateApiDraft({
+                            uiComplexity: normalizeUiComplexity(event.target.value)
+                          })
+                        }
+                      >
+                        {UI_COMPLEXITY_LEVEL_OPTIONS.map((option) => (
+                          <option key={option.label} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                     </label>
                   </>
                 ) : settingsSection === "billing" ? (

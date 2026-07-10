@@ -9,6 +9,7 @@ import {
   createMemoryItemId,
   getDefaultModelsEndpoint,
   getSelectableModelOptions,
+  getUiComplexityLevel,
   normalizeApiSettings,
   normalizeMemoryItems,
   normalizeUiComplexity,
@@ -90,6 +91,16 @@ describe("apiSettings", () => {
     assert.equal(normalizeUiComplexity(120), 100);
     assert.equal(normalizeUiComplexity("nope", 35), 35);
     assert.equal(normalizeApiSettings({ uiComplexity: "88" }).uiComplexity, 88);
+  });
+
+  it("maps UI complexity values onto five display levels", () => {
+    assert.equal(getUiComplexityLevel(0).label, "Minimal");
+    assert.equal(getUiComplexityLevel(20).label, "Minimal");
+    assert.equal(getUiComplexityLevel(21).label, "Simple");
+    assert.equal(getUiComplexityLevel(41).label, "Balanced");
+    assert.equal(getUiComplexityLevel(66).label, "Rich");
+    assert.equal(getUiComplexityLevel(86).label, "Elaborate");
+    assert.equal(getUiComplexityLevel(100).label, "Elaborate");
   });
 
   it("preserves the new user preference prompt while normalizing settings", () => {

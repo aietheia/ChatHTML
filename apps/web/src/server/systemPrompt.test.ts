@@ -24,10 +24,22 @@ test("instructs formula output to use MathJax delimiters", () => {
   assert.match(SYSTEM_PROMPT, /TeX/i);
 });
 
-test("builds a per-turn UI complexity instruction", () => {
-  const prompt = buildUiComplexityPrompt(88);
+test("builds one level-specific UI complexity instruction per turn", () => {
+  const cases = [
+    { value: 10, label: "Minimal" },
+    { value: 30, label: "Simple" },
+    { value: 50, label: "Balanced" },
+    { value: 75, label: "Rich" },
+    { value: 90, label: "Elaborate" }
+  ];
+  const prompts = cases.map(({ value, label }) => {
+    const prompt = buildUiComplexityPrompt(value);
 
-  assert.match(prompt, /88\/100/);
-  assert.match(prompt, /latest request value overrides/i);
-  assert.match(prompt, /elaborate/i);
+    assert.match(prompt, new RegExp(`UI complexity: ${label}`));
+    assert.match(prompt, /latest setting overrides/i);
+    assert.doesNotMatch(prompt, /\d/);
+    return prompt;
+  });
+
+  assert.equal(new Set(prompts).size, cases.length);
 });

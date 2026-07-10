@@ -6,7 +6,14 @@ function clampUiComplexity(value: number): number {
   return Math.min(100, Math.max(0, Math.round(value)));
 }
 
-function getUiComplexityBand(value: number): string {
+type UiComplexityBand =
+  | "minimal"
+  | "simple"
+  | "balanced"
+  | "rich"
+  | "elaborate";
+
+function getUiComplexityBand(value: number): UiComplexityBand {
   if (value <= 20) {
     return "minimal";
   }
@@ -23,20 +30,45 @@ function getUiComplexityBand(value: number): string {
   return "elaborate";
 }
 
+const UI_COMPLEXITY_PROMPTS: Record<UiComplexityBand, string> = {
+  minimal: `UI complexity: Minimal
+- Treat this as a firm scope constraint for custom visual, interactive, app-like, game-like, or tool-like artifacts in this turn. The latest setting overrides earlier complexity preferences unless the user explicitly requests otherwise.
+- Deliver the smallest complete artifact that answers the request. Center one primary subject or action in a flat, immediately readable composition.
+- Keep only essential content and controls. Omit secondary panels, optional statistics, history, filters, tabs, legends, and feature showcases unless the requested task cannot work without them.
+- Prefer a clear static presentation. Add interaction only when it is essential to the requested task.
+- Do not turn a small request into a dashboard. Correctness, readability, and a stable layout take priority over visual ambition.`,
+  simple: `UI complexity: Simple
+- Treat this as a firm scope constraint for custom visual, interactive, app-like, game-like, or tool-like artifacts in this turn. The latest setting overrides earlier complexity preferences unless the user explicitly requests otherwise.
+- Build a focused artifact around the primary subject or workflow, with a shallow hierarchy and an obvious starting point.
+- Include the essential content and controls plus a small amount of immediately useful support, such as a compact status, short explanation, or secondary action.
+- Keep interaction straightforward and local. Avoid advanced modes, dense control groups, deep navigation, and speculative features.
+- Stop when the core experience is clear, polished, and usable; do not expand it into a general-purpose interface.`,
+  balanced: `UI complexity: Balanced
+- Treat this as the default product scope for custom visual, interactive, app-like, game-like, or tool-like artifacts in this turn. The latest setting overrides earlier complexity preferences unless the user explicitly requests otherwise.
+- Create a polished primary experience with purposeful supporting sections. Give every section a distinct role in helping the user understand or complete the task.
+- Include the controls, labels, feedback, and common states that a user would naturally expect. Use moderate information density and restrained interaction.
+- Add useful secondary details when they improve comprehension or workflow, but omit advanced features and decorative modules that do not serve the request.
+- Keep the hierarchy obvious, the layout stable, and the main subject visually dominant.`,
+  rich: `UI complexity: Rich
+- Treat this as a request for a featureful, information-rich custom artifact in this turn. The latest setting overrides earlier complexity preferences unless the user explicitly requests otherwise.
+- Build a strong primary experience supported by contextual controls, informative readouts, status, progress, history, comparison, or exploration tools where they genuinely help.
+- Support coordinated interactions and meaningful state changes when appropriate. Make important feedback visible and keep controls close to the content they affect.
+- Use additional sections only when each one contributes a distinct capability or insight. Avoid duplicated information, decorative panels, and controls that do not work.
+- Preserve a clear focal point and readable hierarchy so the added capability feels organized rather than crowded.`,
+  elaborate: `UI complexity: Elaborate
+- Treat this as a request for a crafted, feature-complete custom experience in this turn. The latest setting overrides earlier complexity preferences unless the user explicitly requests otherwise.
+- Develop the primary workflow and the meaningful secondary workflows that make the artifact feel complete. Include robust controls, contextual information, state feedback, transitions, and useful local interactions where relevant.
+- Anticipate common user states and edge cases, and provide the guidance or recovery behavior needed to keep the experience coherent.
+- Organize advanced capability into clearly separated, readable modules with deliberate visual hierarchy and dependable behavior.
+- Complexity must come from useful depth and completeness, not from decoration, repeated cards, excessive text, or fragile JavaScript. Keep the result stable, legible, and fully functional.`
+};
+
 export function buildUiComplexityPrompt(uiComplexity: number): string {
   const value = clampUiComplexity(uiComplexity);
   const band = getUiComplexityBand(value);
 
-  return `UI complexity setting:
-- Current value: ${value}/100 (${band}). This is a per-turn preference for custom visual, interactive, app-like, game-like, or tool-like artifacts; the latest request value overrides earlier conversation context unless the user explicitly asks otherwise.
-- Correctness, readability, and usable layout are more important than increasing complexity. Never add elements that cause overlap, broken controls, unclear hierarchy, or fragile JavaScript.
-- Do not satisfy this setting with only color, radius, shadow, or spacing changes, but also do not force extra panels when the requested object is naturally small.
-- For ordinary conversational replies, keep the default assistant prose style regardless of this value.
-- 0-20 minimal: render the smallest complete version of the requested artifact. Use one primary subject, one clear hierarchy, essential controls only, and very few supporting details.
-- 21-40 simple: include the core subject plus a small amount of support, such as a concise title, one secondary control group, or one status line.
-- 41-65 balanced: include a polished core layout with purposeful supporting sections, moderate detail, helpful states, and restrained interaction.
-- 66-85 rich: add richer structure only where it helps: secondary controls, status/readout details, contextual labels, light history/progress, or useful local interactions.
-- 86-100 elaborate: make the result feel more crafted and feature-complete when the request benefits from it, but keep every added feature spatially separated and functional. Prefer stable, readable modules over dense decoration.`;
+  return `${UI_COMPLEXITY_PROMPTS[band]}
+- Apply this field only to custom artifacts. For ordinary conversational replies, keep the default assistant prose style.`;
 }
 
 export const SYSTEM_PROMPT = `You are the assistant for ChatHTML Runtime.

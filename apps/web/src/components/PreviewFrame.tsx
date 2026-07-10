@@ -431,6 +431,7 @@ export function PreviewFrame({
           | RenderError["kind"]
           | "resize"
           | "action"
+          | "wheel"
           | "selection"
           | "selection-mode-change";
         actionType?: string;
@@ -443,11 +444,31 @@ export function PreviewFrame({
         mimeType?: string;
         message?: string;
         height?: number;
+        deltaY?: number;
+        deltaMode?: number;
         enabled?: boolean;
         selection?: unknown;
       };
 
       if (data?.source !== "streamui-runtime") {
+        return;
+      }
+
+      if (data.kind === "wheel" && Number.isFinite(data.deltaY)) {
+        const viewport = frameRef.current?.closest<HTMLElement>(".message-list");
+        if (!viewport) {
+          return;
+        }
+
+        const deltaScale =
+          data.deltaMode === 1
+            ? 16
+            : data.deltaMode === 2
+              ? viewport.clientHeight
+              : 1;
+        const deltaY = (data.deltaY ?? 0) * deltaScale;
+        const maxDelta = Math.max(1, viewport.clientHeight * 0.9);
+        viewport.scrollTop += Math.max(-maxDelta, Math.min(deltaY, maxDelta));
         return;
       }
 

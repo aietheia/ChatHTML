@@ -1,6 +1,6 @@
 import { MessagePrimitive } from "@assistant-ui/react";
 import { Check, Pencil, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { ReactNode } from "react";
 import type {
   ArtifactEdit,
@@ -58,30 +58,86 @@ function getArtifactReferenceText(reference: ArtifactEditReference): string {
   return reference.preview || reference.label;
 }
 
+function getElementReferenceSummary(reference: ArtifactEditReference): string {
+  const value = (reference.preview || reference.label || reference.tagName || "控件")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (value.length <= 52) {
+    return value;
+  }
+
+  return `${value.slice(0, 49).trimEnd()}...`;
+}
+
+function ArtifactEditElementSummary({
+  references
+}: {
+  references: ArtifactEditReference[];
+}) {
+  const tooltipId = useId();
+
+  return (
+    <span className="artifact-edit-selection-summary">
+      <button
+        className="artifact-edit-selection-trigger"
+        type="button"
+        aria-describedby={tooltipId}
+      >
+        选区
+      </button>
+      <span
+        className="artifact-edit-selection-popover"
+        id={tooltipId}
+        role="tooltip"
+      >
+        {references.map((reference) => (
+          <span className="artifact-edit-selection-item" key={reference.key}>
+            <span aria-hidden="true" />
+            <span>{getElementReferenceSummary(reference)}</span>
+          </span>
+        ))}
+      </span>
+    </span>
+  );
+}
+
 function ArtifactEditReferenceChip({
   references
 }: {
   references: ArtifactEditReference[];
 }) {
-  const reference = references[0];
-  if (!reference) {
+  const elementReferences = references.filter(
+    (reference) => reference.kind === "element"
+  );
+  const textReferences = references.filter(
+    (reference) => reference.kind === "text"
+  );
+  const textReference = textReferences[0];
+
+  if (!elementReferences.length && !textReference) {
     return null;
   }
 
   return (
-    <span className={`artifact-edit-reference-chip is-${reference.kind}`}>
-      <span className="artifact-selection-kind">
-        {reference.kind === "text" ? "Reference" : "Element"}
-      </span>
-      <span className="artifact-edit-reference-text">
-        {getArtifactReferenceText(reference)}
-      </span>
-      {references.length > 1 ? (
-        <span className="artifact-edit-reference-more">
-          +{references.length - 1}
+    <>
+      {elementReferences.length ? (
+        <ArtifactEditElementSummary references={elementReferences} />
+      ) : null}
+      {textReference ? (
+        <span className="artifact-edit-reference-chip is-text">
+          <span className="artifact-selection-kind">Reference</span>
+          <span className="artifact-edit-reference-text">
+            {getArtifactReferenceText(textReference)}
+          </span>
+          {textReferences.length > 1 ? (
+            <span className="artifact-edit-reference-more">
+              +{textReferences.length - 1}
+            </span>
+          ) : null}
         </span>
       ) : null}
-    </span>
+    </>
   );
 }
 
