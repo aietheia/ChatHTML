@@ -71,6 +71,12 @@ import {
   saveDisplaySettings,
   type DisplaySettings
 } from "./core/displaySettings";
+import {
+  loadProfileSettings,
+  normalizeProfileSettings,
+  saveProfileSettings,
+  type ProfileSettings
+} from "./core/profileSettings";
 import { buildArtifactContext } from "./core/artifactContext";
 import {
   MAX_ARTIFACT_SELECTIONS,
@@ -2196,6 +2202,8 @@ export default function App() {
     useState<SearchSettings>(loadSearchSettings);
   const [displaySettings, setDisplaySettings] =
     useState<DisplaySettings>(loadDisplaySettings);
+  const [profileSettings, setProfileSettings] =
+    useState<ProfileSettings>(loadProfileSettings);
   const [sessionListPreview, setSessionListPreview] =
     useState<SessionListPreview | null>(loadCachedSessionListPreview);
   const [runtimeSettings, setRuntimeSettings] =
@@ -2526,6 +2534,10 @@ export default function App() {
   useEffect(() => {
     saveDisplaySettings(displaySettings);
   }, [displaySettings]);
+
+  useEffect(() => {
+    saveProfileSettings(profileSettings);
+  }, [profileSettings]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -3515,6 +3527,10 @@ export default function App() {
 
   const handleDisplaySettingsChange = useCallback((next: DisplaySettings) => {
     setDisplaySettings(normalizeDisplaySettings(next));
+  }, []);
+
+  const handleProfileSettingsChange = useCallback((next: ProfileSettings) => {
+    setProfileSettings(normalizeProfileSettings(next));
   }, []);
 
   const handleModelChange = useCallback((model: string) => {
@@ -5822,6 +5838,7 @@ export default function App() {
       <AssistantRuntimeProvider runtime={runtime}>
         <ChatShell
           themeMode={themeMode}
+          onThemeModeChange={setThemeMode}
           sidebar={
             <SessionSidebar
               sessions={sidebarSessionItems}
@@ -5831,16 +5848,17 @@ export default function App() {
               apiSettings={apiSettings}
               searchSettings={searchSettings}
               displaySettings={displaySettings}
+              profileSettings={profileSettings}
               runtimeSettings={runtimeSettings}
               cloudEnabled={cloudEnabled}
               authUser={authenticatedUser}
               onNewSession={handleNewSession}
               onSelectSession={handleSelectSession}
               onDeleteSession={handleDeleteSession}
-              onThemeModeChange={setThemeMode}
               onApiSettingsChange={handleApiSettingsChange}
               onSearchSettingsChange={handleSearchSettingsChange}
               onDisplaySettingsChange={handleDisplaySettingsChange}
+              onProfileSettingsChange={handleProfileSettingsChange}
               onAuthUserChange={handleAuthUserChange}
               onLoginRequest={handleAuthOverlayRequest}
               onLogout={handleLogout}

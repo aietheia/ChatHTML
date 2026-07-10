@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
 import {
   Bug,
+  Camera,
   Check,
   CreditCard,
   Download,
@@ -11,13 +12,10 @@ import {
   LogOut,
   Menu,
   MoreHorizontal,
-  Moon,
   PanelLeftOpen,
   Plus,
   Search,
-  Settings2,
   SquarePen,
-  Sun,
   Trash2,
   Upload,
   UserRound,
@@ -38,7 +36,6 @@ import {
   getApiKeyEnvironmentName,
   getUiComplexityLevel,
   getSelectableModelOptions,
-  hasCompleteApiSettings,
   isRequiredModelOption,
   normalizeApiSettings,
   normalizeMemoryItems,
@@ -61,6 +58,11 @@ import {
 } from "../core/searchSettings";
 import type { DisplaySettings } from "../core/displaySettings";
 import {
+  MAX_PROFILE_AVATAR_BYTES,
+  normalizeProfileSettings,
+  type ProfileSettings
+} from "../core/profileSettings";
+import {
   getEnvironmentKeyStatus,
   type EnvironmentKeyStatus,
   type RuntimeSearchBrowserStatus,
@@ -80,10 +82,11 @@ export type SessionListItem = {
   title: string;
 };
 
-type SettingsSection = "api" | "billing" | "preferences" | "display" | "search";
+type SettingsSection = "profile" | "api" | "billing" | "display" | "search";
 
 const COMPACT_SIDEBAR_QUERY = "(max-width: 720px), (orientation: portrait)";
 const APP_VERSION = packageJson.version;
+const APP_COMMIT = __APP_COMMIT__;
 
 function getInitialSidebarCollapsed(): boolean {
   if (typeof window === "undefined") {
@@ -101,16 +104,17 @@ type SessionSidebarProps = {
   apiSettings: ApiSettings;
   searchSettings: SearchSettings;
   displaySettings: DisplaySettings;
+  profileSettings: ProfileSettings;
   runtimeSettings: RuntimeSettingsSummary | null;
   cloudEnabled?: boolean;
   authUser?: AuthUser | null;
   onNewSession(): void;
   onSelectSession(id: string): void;
   onDeleteSession(id: string): void;
-  onThemeModeChange(mode: ThemeMode): void;
   onApiSettingsChange(settings: ApiSettings): void;
   onSearchSettingsChange(settings: SearchSettings): void;
   onDisplaySettingsChange(settings: DisplaySettings): void;
+  onProfileSettingsChange(settings: ProfileSettings): void;
   onAuthUserChange?(user: AuthUser): void;
   onLoginRequest?(): void;
   onLogout?(): void;
@@ -194,6 +198,20 @@ function getSearchCapabilityClass(configured: boolean): string {
   return configured ? "is-configured" : "is-missing";
 }
 
+function ProfileAvatar({
+  avatarDataUrl,
+  size = "sidebar"
+}: {
+  avatarDataUrl: string;
+  size?: "sidebar" | "settings";
+}) {
+  return (
+    <span className={`profile-avatar is-${size}`} aria-hidden="true">
+      {avatarDataUrl ? <img src={avatarDataUrl} alt="" /> : null}
+    </span>
+  );
+}
+
 export function SessionSidebar({
   sessions,
   activeSessionId,
@@ -202,16 +220,17 @@ export function SessionSidebar({
   apiSettings,
   searchSettings,
   displaySettings,
+  profileSettings,
   runtimeSettings,
   cloudEnabled = false,
   authUser,
   onNewSession,
   onSelectSession,
   onDeleteSession,
-  onThemeModeChange,
   onApiSettingsChange,
   onSearchSettingsChange,
   onDisplaySettingsChange,
+  onProfileSettingsChange,
   onAuthUserChange,
   onLoginRequest,
   onLogout,
@@ -223,13 +242,15 @@ export function SessionSidebar({
   const [isCollapsed, setIsCollapsed] = useState(getInitialSidebarCollapsed);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] =
-    useState<SettingsSection>("api");
+    useState<SettingsSection>("profile");
   const [draftApiSettings, setDraftApiSettings] =
     useState<ApiSettings>(apiSettings);
   const [draftSearchSettings, setDraftSearchSettings] =
     useState<SearchSettings>(searchSettings);
   const [draftDisplaySettings, setDraftDisplaySettings] =
     useState<DisplaySettings>(displaySettings);
+  const [draftProfileSettings, setDraftProfileSettings] =
+    useState<ProfileSettings>(profileSettings);
   const [isModelImportOpen, setIsModelImportOpen] = useState(false);
   const [isModelImportLoading, setIsModelImportLoading] = useState(false);
   const [modelImportError, setModelImportError] = useState<string | null>(null);
@@ -240,6 +261,7 @@ export function SessionSidebar({
   const [preferenceImportError, setPreferenceImportError] = useState<string | null>(
     null
   );
+  const [avatarError, setAvatarError] = useState<string | null>(null);
   const [topUpAmount, setTopUpAmount] = useState("10");
   const [isTopUpLoading, setIsTopUpLoading] = useState(false);
   const [topUpFeedback, setTopUpFeedback] = useState<{
@@ -247,17 +269,11 @@ export function SessionSidebar({
     message: string;
   } | null>(null);
   const preferenceFileInputRef = useRef<HTMLInputElement | null>(null);
-  const activeApiKeyStatus = getEnvironmentKeyStatus(
-    runtimeSettings?.api.environmentKeys,
-    getApiKeyEnvironmentName(apiSettings)
-  );
+  const avatarFileInputRef = useRef<HTMLInputElement | null>(null);
   const draftApiKeyStatus = getEnvironmentKeyStatus(
     runtimeSettings?.api.environmentKeys,
     getApiKeyEnvironmentName(draftApiSettings)
   );
-  const activeApiUsesRuntimeKey =
-    apiSettings.apiKeySource === "environment" ||
-    apiSettings.apiKeySource === "managed";
   const draftApiUsesRuntimeKey =
     draftApiSettings.apiKeySource === "environment" ||
     draftApiSettings.apiKeySource === "managed";
@@ -271,9 +287,6 @@ export function SessionSidebar({
       cloudEnabled ||
       preset.id === draftApiSettings.providerId
   );
-  const apiSettingsComplete =
-    hasCompleteApiSettings(apiSettings) &&
-    (!activeApiUsesRuntimeKey || activeApiKeyStatus?.configured !== false);
   const searchAllowsManualKey = searchProviderNeedsApiKey(
     draftSearchSettings.provider
   );
@@ -317,14 +330,16 @@ export function SessionSidebar({
       setDraftApiSettings(apiSettings);
       setDraftSearchSettings(searchSettings);
       setDraftDisplaySettings(displaySettings);
+      setDraftProfileSettings(profileSettings);
       setPreferenceImportError(null);
+      setAvatarError(null);
       setTopUpFeedback(null);
     }
-  }, [apiSettings, displaySettings, isSettingsOpen, searchSettings]);
+  }, [apiSettings, displaySettings, isSettingsOpen, profileSettings, searchSettings]);
 
   useEffect(() => {
     if (!cloudEnabled && settingsSection === "billing") {
-      setSettingsSection("api");
+      setSettingsSection("profile");
     }
   }, [cloudEnabled, settingsSection]);
 
@@ -348,6 +363,36 @@ export function SessionSidebar({
 
   const updateDisplayDraft = (patch: Partial<DisplaySettings>) => {
     setDraftDisplaySettings((current) => ({ ...current, ...patch }));
+  };
+
+  const handleAvatarChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+    if (!/image\/(?:png|jpeg|webp|gif)/i.test(file.type)) {
+      setAvatarError("Choose a PNG, JPEG, WebP, or GIF image.");
+      return;
+    }
+    if (file.size > MAX_PROFILE_AVATAR_BYTES) {
+      setAvatarError("Choose an image smaller than 1 MB.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const avatarDataUrl = typeof reader.result === "string" ? reader.result : "";
+      const normalized = normalizeProfileSettings({ avatarDataUrl });
+      if (!normalized.avatarDataUrl) {
+        setAvatarError("This image could not be used.");
+        return;
+      }
+      setDraftProfileSettings(normalized);
+      setAvatarError(null);
+    };
+    reader.onerror = () => setAvatarError("This image could not be read.");
+    reader.readAsDataURL(file);
   };
 
   const updateUserPreferencePromptDraft = (value: string) => {
@@ -585,6 +630,7 @@ export function SessionSidebar({
     onApiSettingsChange(draftApiSettings);
     onSearchSettingsChange(draftSearchSettings);
     onDisplaySettingsChange(draftDisplaySettings);
+    onProfileSettingsChange(draftProfileSettings);
     setIsSettingsOpen(false);
   };
 
@@ -626,6 +672,18 @@ export function SessionSidebar({
           <div className="collapsed-sidebar-spacer" />
           <div className="collapsed-sidebar-bottom">
             <button
+              className="sidebar-profile-button is-collapsed"
+              type="button"
+              aria-label="Open personal settings"
+              title="Personal settings"
+              onClick={() => {
+                setSettingsSection("profile");
+                setIsSettingsOpen(true);
+              }}
+            >
+              <ProfileAvatar avatarDataUrl={profileSettings.avatarDataUrl} />
+            </button>
+            <button
               className="collapsed-sidebar-button"
               type="button"
               aria-label="Bug Report"
@@ -633,17 +691,6 @@ export function SessionSidebar({
               onClick={onBugReportOpen}
             >
               <Bug size={21} strokeWidth={2} aria-hidden="true" />
-            </button>
-            <button
-              className={`collapsed-sidebar-button api-settings-button ${
-                apiSettingsComplete ? "is-configured" : "needs-setup"
-              }`}
-              type="button"
-              aria-label="API settings"
-              aria-pressed={isSettingsOpen}
-              onClick={() => setIsSettingsOpen(true)}
-            >
-              <Settings2 size={21} strokeWidth={2} aria-hidden="true" />
             </button>
           </div>
         </>
@@ -739,85 +786,28 @@ export function SessionSidebar({
             ))}
           </nav>
 
-          <button
-            className="sidebar-bug-report-button"
-            type="button"
-            onClick={onBugReportOpen}
-          >
-            <Bug size={17} strokeWidth={2.1} aria-hidden="true" />
-            <span>Bug Report</span>
-          </button>
-
           <div className="sidebar-footer">
-            {cloudEnabled && authUser ? (
-              <div className="sidebar-account" title={authUser.email}>
-                <span className="sidebar-account-email">{authUser.email}</span>
-                {typeof authUser.balanceUsd === "string" ? (
-                  <span className="sidebar-account-balance">
-                    ${authUser.balanceUsd}
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
-            {cloudEnabled && !authUser && onLoginRequest ? (
-              <button
-                className="sidebar-icon-button"
-                type="button"
-                aria-label="Sign in to ChatHTML Cloud"
-                title="Sign in to ChatHTML Cloud"
-                onClick={onLoginRequest}
-              >
-                <UserRound size={17} strokeWidth={2.1} aria-hidden="true" />
-              </button>
-            ) : null}
-            <div
-              className="theme-toggle"
-              data-mode={themeMode}
-              role="group"
-              aria-label="Theme"
-            >
-              <span className="theme-toggle-indicator" aria-hidden="true" />
-              <button
-                className="theme-toggle-button"
-                type="button"
-                aria-label="Use day theme"
-                aria-pressed={themeMode === "day"}
-                onClick={() => onThemeModeChange("day")}
-              >
-                <Sun size={15} strokeWidth={2.1} aria-hidden="true" />
-              </button>
-              <button
-                className="theme-toggle-button"
-                type="button"
-                aria-label="Use night theme"
-                aria-pressed={themeMode === "night"}
-                onClick={() => onThemeModeChange("night")}
-              >
-                <Moon size={15} strokeWidth={2.1} aria-hidden="true" />
-              </button>
-            </div>
             <button
-              className={`sidebar-icon-button api-settings-button ${
-                apiSettingsComplete ? "is-configured" : "needs-setup"
-              }`}
+              className="sidebar-profile-button"
               type="button"
-              aria-label="Provider settings"
-              aria-pressed={isSettingsOpen}
-              onClick={() => setIsSettingsOpen(true)}
+              aria-label="Open personal settings"
+              title={authUser?.email || "Personal settings"}
+              onClick={() => {
+                setSettingsSection("profile");
+                setIsSettingsOpen(true);
+              }}
             >
-              <Settings2 size={17} strokeWidth={2.1} aria-hidden="true" />
+              <ProfileAvatar avatarDataUrl={profileSettings.avatarDataUrl} />
             </button>
-            {cloudEnabled && authUser && onLogout ? (
-              <button
-                className="sidebar-icon-button"
-                type="button"
-                aria-label="Sign out"
-                title="Sign out"
-                onClick={onLogout}
-              >
-                <LogOut size={17} strokeWidth={2.1} aria-hidden="true" />
-              </button>
-            ) : null}
+            <button
+              className="sidebar-icon-button"
+              type="button"
+              aria-label="Bug Report"
+              title="Bug Report"
+              onClick={onBugReportOpen}
+            >
+              <Bug size={17} strokeWidth={2.1} aria-hidden="true" />
+            </button>
           </div>
         </>
       )}
@@ -852,6 +842,16 @@ export function SessionSidebar({
               </button>
               <button
                 className={`settings-nav-item ${
+                  settingsSection === "profile" ? "is-active" : ""
+                }`}
+                type="button"
+                onClick={() => setSettingsSection("profile")}
+              >
+                <UserRound size={18} strokeWidth={2.1} aria-hidden="true" />
+                <span>Personal</span>
+              </button>
+              <button
+                className={`settings-nav-item ${
                   settingsSection === "api" ? "is-active" : ""
                 }`}
                 type="button"
@@ -874,16 +874,6 @@ export function SessionSidebar({
               ) : null}
               <button
                 className={`settings-nav-item ${
-                  settingsSection === "preferences" ? "is-active" : ""
-                }`}
-                type="button"
-                onClick={() => setSettingsSection("preferences")}
-              >
-                <UserRound size={18} strokeWidth={2.1} aria-hidden="true" />
-                <span>User Preferences</span>
-              </button>
-              <button
-                className={`settings-nav-item ${
                   settingsSection === "display" ? "is-active" : ""
                 }`}
                 type="button"
@@ -902,20 +892,24 @@ export function SessionSidebar({
                 <Search size={18} strokeWidth={2.1} aria-hidden="true" />
                 <span>Web Search</span>
               </button>
-              <div className="settings-version" aria-label={`Version ${APP_VERSION}`}>
-                v{APP_VERSION}
+              <div
+                className="settings-build-meta"
+                aria-label={`Version ${APP_VERSION}, commit ${APP_COMMIT}`}
+              >
+                <span>v{APP_VERSION}</span>
+                <code>{APP_COMMIT}</code>
               </div>
             </aside>
 
             <div className="settings-content">
               <header className="settings-content-header">
                 <h2 id="settings-panel-title">
-                  {settingsSection === "api"
-                    ? "Providers"
+                  {settingsSection === "profile"
+                    ? "Personal"
+                    : settingsSection === "api"
+                      ? "Providers"
                     : settingsSection === "billing"
                       ? "Billing"
-                    : settingsSection === "preferences"
-                      ? "User Preferences"
                       : settingsSection === "display"
                         ? "Display"
                         : "Web Search"}
@@ -1224,8 +1218,88 @@ export function SessionSidebar({
                       </div>
                     </label>
                   </>
-                ) : settingsSection === "preferences" ? (
+                ) : settingsSection === "profile" ? (
                   <>
+                    <div className="settings-profile-hero">
+                      <button
+                        className="settings-avatar-editor"
+                        type="button"
+                        aria-label="Change profile photo"
+                        onClick={() => avatarFileInputRef.current?.click()}
+                      >
+                        <ProfileAvatar
+                          avatarDataUrl={draftProfileSettings.avatarDataUrl}
+                          size="settings"
+                        />
+                        <span className="settings-avatar-editor-icon">
+                          <Camera size={16} strokeWidth={2.1} aria-hidden="true" />
+                        </span>
+                      </button>
+                      <button
+                        className="settings-avatar-change-button"
+                        type="button"
+                        onClick={() => avatarFileInputRef.current?.click()}
+                      >
+                        Change photo
+                      </button>
+                      {draftProfileSettings.avatarDataUrl ? (
+                        <button
+                          className="settings-avatar-remove-button"
+                          type="button"
+                          onClick={() => {
+                            setDraftProfileSettings({ avatarDataUrl: "" });
+                            setAvatarError(null);
+                          }}
+                        >
+                          Remove
+                        </button>
+                      ) : null}
+                      <input
+                        ref={avatarFileInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/gif"
+                        hidden
+                        onChange={handleAvatarChange}
+                      />
+                      {avatarError ? (
+                        <span className="settings-profile-error">{avatarError}</span>
+                      ) : null}
+                    </div>
+
+                    {cloudEnabled ? (
+                      <div className="settings-row">
+                        <span>Account</span>
+                        <div className="settings-account-control">
+                          <span className="settings-account-copy">
+                            {authUser?.email ?? "Not signed in"}
+                          </span>
+                          {authUser && onLogout ? (
+                            <button
+                              className="settings-small-button"
+                              type="button"
+                              onClick={onLogout}
+                            >
+                              <LogOut size={14} strokeWidth={2.1} aria-hidden="true" />
+                              <span>Sign out</span>
+                            </button>
+                          ) : onLoginRequest ? (
+                            <button
+                              className="settings-small-button"
+                              type="button"
+                              onClick={onLoginRequest}
+                            >
+                              <UserRound
+                                size={14}
+                                strokeWidth={2.1}
+                                aria-hidden="true"
+                              />
+                              <span>Sign in</span>
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+
                     <label className="settings-row settings-row-textarea">
                       <span>User Preference Prompt</span>
                       <textarea
