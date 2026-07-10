@@ -78,6 +78,23 @@ describe("artifact message projection", () => {
     assert.equal(fallbackPatch.content, "Plain fallback");
   });
 
+  it("clears stale snapshot and context when a projected version has no artifact", () => {
+    const previous = {
+      snapshot: { status: "complete" },
+      artifactContext: { textSummary: "stale" }
+    };
+    const projected = {
+      ...previous,
+      ...buildCompletedAssistantPatchFromRawStream(
+        "<chat>Text-only version</chat>",
+        "night"
+      )
+    };
+
+    assert.equal(projected.snapshot, undefined);
+    assert.equal(projected.artifactContext, undefined);
+  });
+
   it("keeps an incomplete StreamUI protocol marker in the final patch", () => {
     const patch = buildCompletedAssistantPatchFromRawStream(
       "<chat>Partial</chat><streamui><section>Loading",

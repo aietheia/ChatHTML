@@ -116,7 +116,6 @@ import {
 import {
   getArtifactEditActiveVariant,
   getArtifactEditCompleteRawStream,
-  getArtifactEditDisplayRawStream,
   getArtifactEditParentId,
   getArtifactEditRawStream,
   getResolvedArtifactEditId,
@@ -136,6 +135,7 @@ import { hasRenderError } from "./features/artifacts/renderErrors";
 import { buildVisualRepairPrompt } from "./features/artifacts/visualRepair";
 import { useArtifactSelections } from "./features/artifacts/useArtifactSelections";
 import { useArtifactActions } from "./features/artifacts/useArtifactActions";
+import { selectArtifactEditVersion } from "./features/artifacts/artifactEditOperationModel";
 import { coerceApiSettingsForRuntime } from "./features/settings/appSettingsPolicy";
 import { useAppSettings } from "./features/settings/useAppSettings";
 import { useCloudAuthController } from "./features/auth/useCloudAuthController";
@@ -2763,23 +2763,15 @@ export default function App() {
 
   const handleSelectArtifactEdit = useCallback(
     (assistantId: string, editId?: string) => {
+      let didSelect = false;
       updateAssistantMessage(assistantId, (message) => {
-        if (message.role !== "assistant") {
-          return message;
-        }
-
-        const rawStream = getArtifactEditDisplayRawStream(message, editId);
-        if (!rawStream) {
-          return message;
-        }
-
-        return {
-          ...message,
-          ...buildCompletedAssistantPatchFromRawStream(rawStream, themeMode),
-          activeArtifactEditId: editId
-        };
+        const result = selectArtifactEditVersion(message, editId, themeMode);
+        didSelect ||= result.selected;
+        return result.message;
       });
-      clearArtifactSelections();
+      if (didSelect) {
+        clearArtifactSelections();
+      }
     },
     [clearArtifactSelections, themeMode, updateAssistantMessage]
   );

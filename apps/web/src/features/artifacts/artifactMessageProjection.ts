@@ -46,10 +46,10 @@ export function buildCompletedAssistantPatchFromRawStream(
   return {
     content: parts.chat || parts.fallbackText,
     rawStream,
-    ...(snapshot ? { snapshot } : {}),
-    ...(hasVisibleStreamUi
-      ? { artifactContext: buildArtifactContext(rawStream) }
-      : {}),
+    snapshot,
+    artifactContext: hasVisibleStreamUi
+      ? buildArtifactContext(rawStream)
+      : undefined,
     hasStreamUi: hasVisibleStreamUi,
     streamUiComplete: parts.streamUiComplete,
     runtimeErrors: undefined,
