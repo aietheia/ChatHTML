@@ -170,7 +170,7 @@ test("serves browser media inline and reuses the verified server response", asyn
   assert.equal(fetchCalls, 1);
   assert.equal(headers.get("content-disposition"), 'inline; filename="media-image"');
   assert.equal(headers.get("cache-control"), "public, max-age=86400, immutable");
-  assert.equal(headers.get("cross-origin-resource-policy"), "same-origin");
+  assert.equal(headers.get("cross-origin-resource-policy"), "cross-origin");
 });
 
 test("rejects and cancels active SVG content", async () => {

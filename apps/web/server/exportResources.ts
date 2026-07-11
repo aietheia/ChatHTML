@@ -288,7 +288,9 @@ export function createMediaImageRequestHandler(
       res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
       res.setHeader("Content-Type", resource.contentType);
       res.setHeader("Content-Length", String(resource.body.byteLength));
-      res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+      // The preview uses an opaque-origin sandbox, so even its same-site image
+      // request is cross-origin from the browser's point of view.
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.send(resource.body);
     } catch (error) {
