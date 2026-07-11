@@ -9,6 +9,7 @@ import {
   type ApiSettings,
   type MemoryItem
 } from "../core/apiSettings";
+import type { AccountMode } from "../core/accountMode";
 import type { AuthUser } from "../core/cloudAuth";
 import { topUpBalance } from "../core/cloudBilling";
 import type { DisplaySettings } from "../core/displaySettings";
@@ -58,6 +59,7 @@ export type SettingsDialogProps = {
   profileSettings: ProfileSettings;
   runtimeSettings: RuntimeSettingsSummary | null;
   cloudEnabled: boolean;
+  accountMode: AccountMode;
   authUser?: AuthUser | null;
   onClose(): void;
   onSectionChange(section: SettingsSection): void;
@@ -79,6 +81,7 @@ export function SettingsDialog({
   profileSettings,
   runtimeSettings,
   cloudEnabled,
+  accountMode,
   authUser,
   onClose,
   onSectionChange,
@@ -308,6 +311,8 @@ export function SettingsDialog({
         <SettingsNavigation
           section={section}
           cloudEnabled={cloudEnabled}
+          accountMode={accountMode}
+          profileSettings={profileSettings}
           authUser={authUser}
           onSectionChange={onSectionChange}
           onLoginRequest={onLoginRequest}
@@ -368,6 +373,7 @@ export function SettingsDialog({
                 apiSettings={draftApiSettings}
                 profileSettings={draftProfileSettings}
                 cloudEnabled={cloudEnabled}
+                accountMode={accountMode}
                 authUser={authUser}
                 avatarError={avatarError}
                 preferenceImportError={preferenceImportError}

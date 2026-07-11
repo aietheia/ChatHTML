@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { AccountMode } from "../core/accountMode";
 import { DEFAULT_API_SETTINGS } from "../core/apiSettings";
 import { DEFAULT_DISPLAY_SETTINGS } from "../core/displaySettings";
 import { DEFAULT_PROFILE_SETTINGS } from "../core/profileSettings";
@@ -11,7 +12,11 @@ import { SettingsNavigation } from "./settings/SettingsNavigation";
 
 (globalThis as typeof globalThis & { React: typeof React }).React = React;
 
-function renderSidebar(authenticated: boolean): string {
+function renderSidebar(
+  authenticated: boolean,
+  accountMode: AccountMode = "unselected",
+  cloudEnabled = true
+): string {
   return renderToStaticMarkup(
     <SessionSidebar
       sessions={[]}
@@ -24,7 +29,8 @@ function renderSidebar(authenticated: boolean): string {
       displaySettings={DEFAULT_DISPLAY_SETTINGS}
       profileSettings={DEFAULT_PROFILE_SETTINGS}
       runtimeSettings={null}
-      cloudEnabled
+      cloudEnabled={cloudEnabled}
+      accountMode={accountMode}
       authUser={
         authenticated
           ? { id: "user-1", email: "user@example.com", role: "user" }
@@ -43,11 +49,17 @@ function renderSidebar(authenticated: boolean): string {
   );
 }
 
-function renderNavigation(authenticated: boolean): string {
+function renderNavigation(
+  authenticated: boolean,
+  accountMode: AccountMode = "unselected",
+  cloudEnabled = true
+): string {
   return renderToStaticMarkup(
     <SettingsNavigation
       section="profile"
-      cloudEnabled
+      cloudEnabled={cloudEnabled}
+      accountMode={accountMode}
+      profileSettings={DEFAULT_PROFILE_SETTINGS}
       authUser={
         authenticated
           ? { id: "user-1", email: "user@example.com", role: "user" }
@@ -85,5 +97,29 @@ describe("account entry points", () => {
     assert.match(sidebar, /profile-avatar/);
     assert.match(settings, /settings-auth-entry is-authenticated/);
     assert.match(settings, /user@example\.com/);
+  });
+
+  it("replaces sign-in actions with the local profile after choosing local mode", () => {
+    const sidebar = renderSidebar(false, "local");
+    const settings = renderNavigation(false, "local");
+
+    assert.doesNotMatch(sidebar, /aria-label="Sign in to ChatHTML"/);
+    assert.doesNotMatch(settings, />Sign in</);
+    assert.match(sidebar, /profile-avatar/);
+    assert.match(sidebar, />Local profile</);
+    assert.match(settings, /settings-auth-entry is-authenticated is-local/);
+    assert.match(settings, /profile-avatar/);
+    assert.match(settings, />Local profile</);
+  });
+
+  it("keeps the local profile visible when cloud features are disabled", () => {
+    const sidebar = renderSidebar(false, "local", false);
+    const settings = renderNavigation(false, "local", false);
+
+    assert.match(sidebar, /profile-avatar/);
+    assert.match(sidebar, />Local profile</);
+    assert.match(settings, /profile-avatar/);
+    assert.match(settings, />Local profile</);
+    assert.doesNotMatch(settings, />Sign in</);
   });
 });

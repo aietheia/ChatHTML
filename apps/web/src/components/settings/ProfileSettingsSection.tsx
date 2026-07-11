@@ -6,6 +6,7 @@ import {
   MAX_USER_PREFERENCE_PROMPT_LENGTH,
   type ApiSettings
 } from "../../core/apiSettings";
+import type { AccountMode } from "../../core/accountMode";
 import type { AuthUser } from "../../core/cloudAuth";
 import type { ProfileSettings } from "../../core/profileSettings";
 import { ProfileAvatar } from "../ProfileAvatar";
@@ -14,6 +15,7 @@ type ProfileSettingsSectionProps = {
   apiSettings: ApiSettings;
   profileSettings: ProfileSettings;
   cloudEnabled: boolean;
+  accountMode: AccountMode;
   authUser?: AuthUser | null;
   avatarError: string | null;
   preferenceImportError: string | null;
@@ -35,6 +37,7 @@ export function ProfileSettingsSection({
   apiSettings,
   profileSettings,
   cloudEnabled,
+  accountMode,
   authUser,
   avatarError,
   preferenceImportError,
@@ -96,12 +99,13 @@ export function ProfileSettingsSection({
         ) : null}
       </div>
 
-      {cloudEnabled ? (
+      {cloudEnabled || accountMode === "local" ? (
         <div className="settings-row">
           <span>Account</span>
           <div className="settings-account-control">
             <span className="settings-account-copy">
-              {authUser?.email ?? "Not signed in"}
+              {authUser?.email ??
+                (accountMode === "local" ? "Local profile" : "Not signed in")}
             </span>
             {authUser && onLogout ? (
               <button

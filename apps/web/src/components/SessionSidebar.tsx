@@ -9,6 +9,7 @@ import {
   Trash2,
   X
 } from "lucide-react";
+import type { AccountMode } from "../core/accountMode";
 import type { ApiSettings } from "../core/apiSettings";
 import type { AuthUser } from "../core/cloudAuth";
 import type { DisplaySettings } from "../core/displaySettings";
@@ -48,6 +49,7 @@ type SessionSidebarProps = {
   profileSettings: ProfileSettings;
   runtimeSettings: RuntimeSettingsSummary | null;
   cloudEnabled?: boolean;
+  accountMode?: AccountMode;
   authUser?: AuthUser | null;
   onNewSession(): void;
   onSelectSession(id: string): void;
@@ -75,6 +77,7 @@ export function SessionSidebar({
   profileSettings,
   runtimeSettings,
   cloudEnabled = false,
+  accountMode = "unselected",
   authUser,
   onNewSession,
   onSelectSession,
@@ -97,6 +100,8 @@ export function SessionSidebar({
   const [settingsSection, setSettingsSection] =
     useState<SettingsSection>("profile");
   const [openSessionMenuId, setOpenSessionMenuId] = useState<string | null>(null);
+  const shouldShowSignIn =
+    cloudEnabled && !authUser && accountMode !== "local" && onLoginRequest;
 
   useEffect(() => {
     const mediaQuery = window.matchMedia(COMPACT_SIDEBAR_QUERY);
@@ -166,7 +171,7 @@ export function SessionSidebar({
           </div>
           <div className="collapsed-sidebar-spacer" />
           <div className="collapsed-sidebar-bottom">
-            {cloudEnabled && !authUser && onLoginRequest ? (
+            {shouldShowSignIn ? (
               <button
                 className="sidebar-sign-in-button is-collapsed"
                 type="button"
@@ -292,7 +297,7 @@ export function SessionSidebar({
           </nav>
 
           <div className="sidebar-footer">
-            {cloudEnabled && !authUser && onLoginRequest ? (
+            {shouldShowSignIn ? (
               <button
                 className="sidebar-sign-in-button"
                 type="button"
@@ -326,6 +331,19 @@ export function SessionSidebar({
                   >
                     {authUser.email}
                   </button>
+                ) : accountMode === "local" ? (
+                  <button
+                    className="sidebar-account-label"
+                    type="button"
+                    title="Local profile"
+                    aria-label="Open local profile settings"
+                    onClick={() => {
+                      setSettingsSection("profile");
+                      setIsSettingsOpen(true);
+                    }}
+                  >
+                    Local profile
+                  </button>
                 ) : null}
               </div>
             )}
@@ -352,6 +370,7 @@ export function SessionSidebar({
           profileSettings={profileSettings}
           runtimeSettings={runtimeSettings}
           cloudEnabled={cloudEnabled}
+          accountMode={accountMode}
           authUser={authUser}
           onClose={() => setIsSettingsOpen(false)}
           onSectionChange={setSettingsSection}

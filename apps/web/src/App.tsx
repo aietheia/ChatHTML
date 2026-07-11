@@ -14,6 +14,11 @@ import { ChatShell } from "./components/ChatShell";
 import { AuthChoiceDialog } from "./components/AuthChoiceDialog";
 import { BugReportDialog } from "./components/BugReportDialog";
 import { SessionSidebar } from "./components/SessionSidebar";
+import {
+  loadAccountMode,
+  saveAccountMode,
+  type AccountMode
+} from "./core/accountMode";
 import { createId } from "./domain/chat/sessionModel";
 import { useChatRunCancellation } from "./features/chat/useChatRunCancellation";
 import { createChatRunReconnectScheduler } from "./features/chat/chatRunReconnectScheduler";
@@ -121,6 +126,7 @@ export default function App() {
     refresh: refreshAuthSummary,
     logout: logoutCloudAccount
   } = useCloudAuthController({ cloudEnabled });
+  const [accountMode, setAccountMode] = useState<AccountMode>(loadAccountMode);
   const [isAuthChoiceOpen, setIsAuthChoiceOpen] = useState(false);
   const [providerSettingsRequestVersion, setProviderSettingsRequestVersion] =
     useState(0);
@@ -202,6 +208,8 @@ export default function App() {
     setIsAuthChoiceOpen(false);
     pendingManagedRequestSlot.clear();
     pendingVisualRepairSlot.clear();
+    setAccountMode("local");
+    saveAccountMode("local");
     setProviderSettingsRequestVersion((current) => current + 1);
   }, [pendingManagedRequestSlot, pendingVisualRepairSlot]);
   const handleLogout = useCallback(async () => {
@@ -717,6 +725,7 @@ export default function App() {
               profileSettings={profileSettings}
               runtimeSettings={runtimeSettings}
               cloudEnabled={cloudEnabled}
+              accountMode={accountMode}
               authUser={authenticatedUser}
               onNewSession={handleNewSession}
               onSelectSession={handleSelectSession}
