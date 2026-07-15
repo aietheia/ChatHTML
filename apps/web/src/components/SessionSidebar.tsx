@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Bug,
+  Laptop,
   LogIn,
   LoaderCircle,
   Menu,
@@ -28,6 +29,7 @@ export type ThemeMode = "day" | "night";
 export type SessionListItem = {
   id: string;
   title: string;
+  local?: boolean;
 };
 
 const COMPACT_SIDEBAR_QUERY = "(max-width: 720px), (orientation: portrait)";
@@ -43,6 +45,7 @@ function getInitialSidebarCollapsed(): boolean {
 type SessionSidebarProps = {
   sessions: SessionListItem[];
   activeSessionId: string;
+  activeSessionLocal?: boolean;
   isSending: boolean;
   isSessionSelectionBlocked: boolean;
   themeMode: ThemeMode;
@@ -55,8 +58,8 @@ type SessionSidebarProps = {
   accountMode?: AccountMode;
   authUser?: AuthUser | null;
   onNewSession(): void;
-  onSelectSession(id: string): void;
-  onDeleteSession(id: string): void;
+  onSelectSession(id: string, local: boolean): void;
+  onDeleteSession(id: string, local: boolean): void;
   onApiSettingsChange(settings: ApiSettings): void;
   onSearchSettingsChange(settings: SearchSettings): void;
   onDisplaySettingsChange(settings: DisplaySettings): void;
@@ -72,6 +75,7 @@ type SessionSidebarProps = {
 export function SessionSidebar({
   sessions,
   activeSessionId,
+  activeSessionLocal = false,
   isSending,
   isSessionSelectionBlocked,
   themeMode,
@@ -353,50 +357,72 @@ export function SessionSidebar({
           </div>
 
           <nav className="session-list" aria-label="Saved sessions">
-            {sessions.map((session) => (
+            {sessions.map((session) => {
+              const isLocal = Boolean(session.local && authUser);
+              const isActive =
+                session.id === activeSessionId && isLocal === activeSessionLocal;
+              const menuId = `${isLocal ? "local" : "account"}:${session.id}`;
+              const canManage = isLocal === activeSessionLocal;
+              return (
               <div
-                key={session.id}
-                className={`session-list-item ${
-                  session.id === activeSessionId ? "is-active" : ""
-                } ${openSessionMenuId === session.id ? "is-menu-open" : ""}`}
+                key={menuId}
+                className={`session-list-item ${isActive ? "is-active" : ""} ${
+                  openSessionMenuId === menuId ? "is-menu-open" : ""
+                }`}
               >
                 <button
                   className="session-select-button"
                   type="button"
                   disabled={isSessionSelectionBlocked}
                   aria-current={
-                    session.id === activeSessionId ? "page" : undefined
+                    isActive ? "page" : undefined
                   }
                   onClick={() => {
                     setOpenSessionMenuId(null);
                     if (isCompactSidebar) {
                       setIsCollapsed(true);
                     }
-                    onSelectSession(session.id);
+                    onSelectSession(session.id, isLocal);
                   }}
                 >
-                  <span className="session-title">{session.title}</span>
+                  <span className="session-title-row">
+                    {isLocal ? (
+                      <Laptop
+                        className="session-location-icon"
+                        size={14}
+                        strokeWidth={2}
+                        aria-label="Stored on this device"
+                      />
+                    ) : null}
+                    <span className="session-title">{session.title}</span>
+                  </span>
                 </button>
-                <button
-                  ref={
-                    openSessionMenuId === session.id
-                      ? openSessionMenuButtonRef
-                      : undefined
-                  }
-                  className="session-actions-button"
-                  type="button"
-                  disabled={isSending}
-                  aria-label={`Session actions: ${session.title}`}
-                  aria-expanded={openSessionMenuId === session.id}
-                  onClick={() =>
-                    setOpenSessionMenuId((current) =>
-                      current === session.id ? null : session.id
-                    )
-                  }
-                >
-                  <MoreHorizontal size={17} strokeWidth={2.1} aria-hidden="true" />
-                </button>
-                {openSessionMenuId === session.id ? (
+                {canManage ? (
+                  <button
+                    ref={
+                      openSessionMenuId === menuId
+                        ? openSessionMenuButtonRef
+                        : undefined
+                    }
+                    className="session-actions-button"
+                    type="button"
+                    disabled={isSending}
+                    aria-label={`Session actions: ${session.title}`}
+                    aria-expanded={openSessionMenuId === menuId}
+                    onClick={() =>
+                      setOpenSessionMenuId((current) =>
+                        current === menuId ? null : menuId
+                      )
+                    }
+                  >
+                    <MoreHorizontal
+                      size={17}
+                      strokeWidth={2.1}
+                      aria-hidden="true"
+                    />
+                  </button>
+                ) : null}
+                {canManage && openSessionMenuId === menuId ? (
                   <div
                     ref={openSessionMenuPopoverRef}
                     className="session-menu-popover"
@@ -412,7 +438,7 @@ export function SessionSidebar({
                         requestSessionDeletion(
                           session,
                           confirmDeleteSession,
-                          onDeleteSession
+                          (sessionId) => onDeleteSession(sessionId, isLocal)
                         );
                       }}
                     >
@@ -422,7 +448,8 @@ export function SessionSidebar({
                   </div>
                 ) : null}
               </div>
-            ))}
+              );
+            })}
           </nav>
 
           <div className="sidebar-footer">

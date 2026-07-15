@@ -15,11 +15,16 @@ import { SettingsNavigation } from "./settings/SettingsNavigation";
 function renderSidebar(
   authenticated: boolean,
   accountMode: AccountMode = "unselected",
-  cloudEnabled = true
+  cloudEnabled = true,
+  includeLocalSession = false
 ): string {
   return renderToStaticMarkup(
     <SessionSidebar
-      sessions={[]}
+      sessions={
+        includeLocalSession
+          ? [{ id: "local-1", title: "Local chat", local: true }]
+          : []
+      }
       activeSessionId=""
       isSending={false}
       isSessionSelectionBlocked={false}
@@ -112,5 +117,16 @@ describe("account entry points", () => {
     assert.doesNotMatch(settings, /profile-avatar/);
     assert.doesNotMatch(settings, />Local profile</);
     assert.doesNotMatch(settings, />Sign in</);
+  });
+
+  it("marks browser-only sessions only while an account is signed in", () => {
+    assert.match(
+      renderSidebar(true, "unselected", true, true),
+      /aria-label="Stored on this device"/
+    );
+    assert.doesNotMatch(
+      renderSidebar(false, "local", true, true),
+      /aria-label="Stored on this device"/
+    );
   });
 });

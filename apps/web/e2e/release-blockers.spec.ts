@@ -783,3 +783,176 @@ test("required account mode offers browser-direct BYO without leaking keys or lo
     )
     .not.toBeNull();
 });
+
+test("signed-in users can keep or merge browser sessions with their files", async ({
+  page
+}) => {
+  let sessionState: MockSessionState = initialSessionState();
+  let uploadedFiles = 0;
+  await page.addInitScript(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem("streamui.theme.v1", "day");
+    window.localStorage.setItem("streamui.accountMode.v1", "unselected");
+    window.localStorage.setItem(
+      "chathtml.browserWorkspace.v1",
+      JSON.stringify({
+        activeSessionId: "local-session",
+        sessions: [
+          {
+            id: "local-session",
+            title: "Local browser chat",
+            createdAt: 10,
+            updatedAt: 11,
+            messages: [
+              {
+                id: "local-message",
+                role: "user",
+                content: "Local browser chat",
+                fileIds: ["local-file"]
+              }
+            ],
+            files: [
+              {
+                id: "local-file",
+                kind: "text",
+                name: "local-notes.txt",
+                mimeType: "text/plain",
+                size: 11,
+                createdAt: 10,
+                sourceMessageId: "local-message",
+                text: "local notes"
+              }
+            ]
+          }
+        ]
+      })
+    );
+  });
+  await page.context().route("**/api/**", async (route) => {
+    const request = route.request();
+    const path = decodeURIComponent(new URL(request.url()).pathname);
+    if (!path.startsWith("/api/")) {
+      await route.continue();
+      return;
+    }
+    if (path === "/api/settings") {
+      const settings = runtimeSettings();
+      settings.cloud.enabled = true;
+      settings.cloud.authRequired = true;
+      await fulfillJson(route, settings);
+      return;
+    }
+    if (path === "/api/auth/me") {
+      await fulfillJson(route, {
+        user: { id: "e2e-user", email: "e2e@example.com", role: "user" },
+        auth: { available: true, requiresInvite: false, firstUser: false }
+      });
+      return;
+    }
+    if (path === "/api/sessions/index") {
+      await fulfillJson(route, {
+        activeSessionId: sessionState.activeSessionId,
+        sessions: sessionState.sessions.map((session) => ({
+          id: session.id,
+          title: session.title
+        }))
+      });
+      return;
+    }
+    if (path === "/api/sessions") {
+      if (request.method() === "PUT") {
+        const payload = request.postDataJSON() as MockSessionState & {
+          saveRevision?: number;
+        };
+        sessionState = {
+          activeSessionId: payload.activeSessionId,
+          sessions: payload.sessions
+        };
+        await fulfillJson(route, {
+          applied: true,
+          currentSaveRevision: payload.saveRevision
+        });
+        return;
+      }
+      await fulfillJson(route, sessionState);
+      return;
+    }
+    if (
+      path === "/api/sessions/browser-import:local-session/files" &&
+      request.method() === "POST"
+    ) {
+      uploadedFiles += 1;
+      const body = request.postDataJSON() as { text?: string };
+      expect(body.text).toBe("local notes");
+      const file = {
+        id: "server-local-file",
+        kind: "text",
+        name: "local-notes.txt",
+        mimeType: "text/plain",
+        size: 11,
+        createdAt: 12,
+        sourceMessageId: "local-message",
+        storageKey: "files/server-local-file",
+        contentHash: "e2e-hash",
+        accessToken: "e2e-token"
+      };
+      sessionState = {
+        ...sessionState,
+        sessions: sessionState.sessions.map((session) =>
+          session.id === "browser-import:local-session"
+            ? {
+                ...session,
+                files: [
+                  ...((session.files as Array<Record<string, unknown>>) ?? []),
+                  file
+                ]
+              }
+            : session
+        )
+      };
+      await fulfillJson(route, { file });
+      return;
+    }
+    await fulfillJson(route, { error: `Unexpected test request: ${path}` }, 404);
+  });
+
+  await page.goto("/");
+  const mergeDialog = page.getByRole("dialog", {
+    name: "Save local sessions to your account?"
+  });
+  await expect(mergeDialog).toBeVisible();
+  await expect(mergeDialog).toContainText("1 local session");
+  await expect(page.getByLabel("Stored on this device")).toBeVisible();
+
+  await mergeDialog
+    .getByRole("button", { name: "Keep only on this device" })
+    .click();
+  await expect(mergeDialog).toBeHidden();
+  await expect(page.getByLabel("Stored on this device")).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      window.localStorage.getItem("chathtml.browserWorkspace.v1")
+    )
+  ).not.toBeNull();
+
+  await page.reload();
+  await expect(mergeDialog).toBeVisible();
+  await mergeDialog.getByRole("button", { name: "Merge 1 local session" }).click();
+  await expect(mergeDialog).toBeHidden();
+  await expect(page.getByText("Local browser", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Stored on this device")).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.localStorage.getItem("chathtml.browserWorkspace.v1")
+      )
+    )
+    .toBeNull();
+  expect(uploadedFiles).toBe(1);
+  const imported = sessionState.sessions.find(
+    (session) => session.id === "browser-import:local-session"
+  );
+  expect(
+    (imported?.messages as Array<{ fileIds?: string[] }>)[0].fileIds
+  ).toEqual(["server-local-file"]);
+});

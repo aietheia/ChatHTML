@@ -13,6 +13,7 @@ import {
 import { ChatShell } from "./components/ChatShell";
 import { AuthChoiceDialog } from "./components/AuthChoiceDialog";
 import { BugReportDialog } from "./components/BugReportDialog";
+import { LocalSessionMergeDialog } from "./components/LocalSessionMergeDialog";
 import { SessionPersistenceStatus } from "./components/SessionPersistenceStatus";
 import { SessionSidebar } from "./components/SessionSidebar";
 import {
@@ -21,7 +22,11 @@ import {
   type AccountMode
 } from "./core/accountMode";
 import { providerSupportsReasoning } from "./core/apiSettings";
-import { createId } from "./domain/chat/sessionModel";
+import {
+  createId,
+  isSessionEmpty,
+  type SessionState
+} from "./domain/chat/sessionModel";
 import { useChatRunCancellation } from "./features/chat/useChatRunCancellation";
 import { createChatRunReconnectScheduler } from "./features/chat/chatRunReconnectScheduler";
 import type { ChatRunExecutionController } from "./features/chat/chatRunExecutionController";
@@ -68,10 +73,19 @@ import {
 } from "./features/sessions/sessionApi";
 import {
   createBrowserLocalSessionFile,
+  browserLocalWorkspaceSignature,
+  clearBrowserLocalWorkspace,
   flushBrowserLocalWorkspace,
+  loadBrowserLocalWorkspace,
   requestBrowserLocalWorkspace,
   saveBrowserLocalWorkspace
 } from "./features/sessions/browserLocalWorkspace";
+import { mergeLocalWorkspaceIntoAccount } from "./features/sessions/localWorkspaceMerge";
+import {
+  clearKeptLocalWorkspace,
+  hasKeptLocalWorkspace,
+  rememberKeptLocalWorkspace
+} from "./features/sessions/localWorkspaceDecision";
 import { useSessionSync } from "./features/sessions/useSessionSync";
 import { useSessionSave } from "./features/sessions/useSessionSave";
 import { useSessionIndex } from "./features/sessions/useSessionIndex";
@@ -81,7 +95,10 @@ import { useComposerSessionDrafts } from "./features/sessions/useComposerSession
 import { useSessionAttachmentController } from "./features/sessions/useSessionAttachmentController";
 import { useSessionStateController } from "./features/sessions/useSessionStateController";
 import { useSessionMessageMutations } from "./features/sessions/useSessionMessageMutations";
-import { useSessionViewModel } from "./features/sessions/useSessionViewModel";
+import {
+  deriveSessionListItems,
+  useSessionViewModel
+} from "./features/sessions/useSessionViewModel";
 import {
   useGeneratedArtifactBatchRecovery,
   useStaleArtifactEditSweep
@@ -116,6 +133,26 @@ import type {
 
 const SESSION_SYNC_INTERVAL_MS = 4_000;
 const SESSION_SAVE_DEBOUNCE_MS = 350;
+
+type AuthenticatedWorkspaceScope = "account" | "local";
+
+function meaningfulLocalState(state: SessionState | null): SessionState | null {
+  if (!state) {
+    return null;
+  }
+  const sessions = state.sessions.filter((session) => !isSessionEmpty(session));
+  if (!sessions.length) {
+    return null;
+  }
+  return {
+    sessions,
+    activeSessionId: sessions.some(
+      (session) => session.id === state.activeSessionId
+    )
+      ? state.activeSessionId
+      : sessions[0].id
+  };
+}
 
 export default function App() {
   const {
@@ -158,10 +195,20 @@ export default function App() {
     logout: logoutCloudAccount
   } = useCloudAuthController({ cloudEnabled });
   const [accountMode, setAccountMode] = useState<AccountMode>(loadAccountMode);
+  const [authenticatedWorkspaceScope, setAuthenticatedWorkspaceScope] =
+    useState<AuthenticatedWorkspaceScope>("account");
+  const [localWorkspaceSnapshot, setLocalWorkspaceSnapshot] =
+    useState<SessionState | null>(() => loadBrowserLocalWorkspace());
+  const [accountWorkspaceSnapshot, setAccountWorkspaceSnapshot] =
+    useState<SessionState | null>(null);
+  const [isWorkspaceSwitching, setIsWorkspaceSwitching] = useState(false);
+  const [isLocalMergeOpen, setIsLocalMergeOpen] = useState(false);
+  const [isLocalMergeBusy, setIsLocalMergeBusy] = useState(false);
+  const [localMergeError, setLocalMergeError] = useState<string | null>(null);
   const browserLocalWorkspace =
-    accountMode === "local" &&
-    !authenticatedUser &&
-    apiSettings.apiKeySource === "manual";
+    authenticatedUser
+      ? authenticatedWorkspaceScope === "local"
+      : accountMode === "local" && apiSettings.apiKeySource === "manual";
   const browserDirectProvider = usesBrowserDirectProvider(apiSettings);
   const sessionAccessEnabled = Boolean(
     runtimeSettings &&
@@ -222,7 +269,7 @@ export default function App() {
           ? null
           : loadLegacyLocalSessionState()
     }),
-    []
+    [browserLocalWorkspace]
   );
   const sessionSaveDependencies = useMemo(
     () => ({
@@ -369,6 +416,13 @@ export default function App() {
     const nextUserId = authenticatedUser?.id ?? null;
     if (authenticatedUserIdRef.current !== nextUserId) {
       resetSessionState();
+      setAuthenticatedWorkspaceScope("account");
+      setAccountWorkspaceSnapshot(null);
+      setLocalWorkspaceSnapshot(loadBrowserLocalWorkspace());
+      setIsWorkspaceSwitching(false);
+      setIsLocalMergeOpen(false);
+      setIsLocalMergeBusy(false);
+      setLocalMergeError(null);
       authenticatedUserIdRef.current = nextUserId;
     }
   }, [authenticatedUser?.id, resetSessionState]);
@@ -428,7 +482,7 @@ export default function App() {
   });
 
   useSessionSync({
-    enabled: sessionAccessEnabled,
+    enabled: sessionAccessEnabled && !isLocalMergeBusy,
     sessionsLoaded,
     intervalMs: SESSION_SYNC_INTERVAL_MS,
     sessionClientIdRef,
@@ -451,14 +505,17 @@ export default function App() {
   });
 
   useStaleArtifactEditSweep(
-    sessionAccessEnabled && sessionsLoaded,
+    sessionAccessEnabled && !isLocalMergeBusy && sessionsLoaded,
     setSessionStateAndRef
   );
 
   const saveCurrentSessionStateNow = useSessionSave({
     sessionState,
     sessionsLoaded:
-      sessionAccessEnabled && sessionsLoaded && sessionsHydrated,
+      sessionAccessEnabled &&
+      !isLocalMergeBusy &&
+      sessionsLoaded &&
+      sessionsHydrated,
     debounceMs: SESSION_SAVE_DEBOUNCE_MS,
     sessionStateRef,
     sessionsLoadedRef: sessionSaveReadyRef,
@@ -467,6 +524,118 @@ export default function App() {
     onStatusChange: setSessionSaveStatus,
     dependencies: sessionSaveDependencies
   });
+
+  useEffect(() => {
+    if (!sessionsHydrated) {
+      return;
+    }
+    if (browserLocalWorkspace) {
+      setLocalWorkspaceSnapshot(meaningfulLocalState(sessionState));
+    } else if (authenticatedUser) {
+      setAccountWorkspaceSnapshot(sessionState);
+    }
+  }, [
+    authenticatedUser,
+    browserLocalWorkspace,
+    sessionState,
+    sessionsHydrated
+  ]);
+
+  const localStateAvailableToAccount = useMemo(
+    () => meaningfulLocalState(localWorkspaceSnapshot),
+    [localWorkspaceSnapshot]
+  );
+  const localWorkspaceDecisionSignature = useMemo(
+    () =>
+      localStateAvailableToAccount
+        ? browserLocalWorkspaceSignature(localStateAvailableToAccount)
+        : "",
+    [localStateAvailableToAccount]
+  );
+
+  useEffect(() => {
+    if (
+      !authenticatedUser ||
+      authenticatedWorkspaceScope !== "account" ||
+      !sessionsLoaded ||
+      !sessionsHydrated ||
+      !localStateAvailableToAccount ||
+      isLocalMergeOpen ||
+      hasKeptLocalWorkspace(
+        authenticatedUser.id,
+        localWorkspaceDecisionSignature
+      )
+    ) {
+      return;
+    }
+    setLocalMergeError(null);
+    setIsLocalMergeOpen(true);
+  }, [
+    authenticatedUser,
+    authenticatedWorkspaceScope,
+    isLocalMergeOpen,
+    localStateAvailableToAccount,
+    localWorkspaceDecisionSignature,
+    sessionsHydrated,
+    sessionsLoaded
+  ]);
+
+  const handleKeepLocalWorkspace = useCallback(() => {
+    if (!authenticatedUser || !localStateAvailableToAccount) {
+      setIsLocalMergeOpen(false);
+      return;
+    }
+    rememberKeptLocalWorkspace(
+      authenticatedUser.id,
+      browserLocalWorkspaceSignature(localStateAvailableToAccount)
+    );
+    setLocalMergeError(null);
+    setIsLocalMergeOpen(false);
+  }, [authenticatedUser, localStateAvailableToAccount]);
+
+  const handleMergeLocalWorkspace = useCallback(async () => {
+    if (!authenticatedUser || !localStateAvailableToAccount) {
+      setIsLocalMergeOpen(false);
+      return;
+    }
+    setIsLocalMergeBusy(true);
+    setLocalMergeError(null);
+    try {
+      const saveOutcome = await saveCurrentSessionStateNow();
+      if (saveOutcome === "failed") {
+        throw new Error(
+          "Your account workspace could not be saved before the merge."
+        );
+      }
+      const latestLocalState =
+        loadBrowserLocalWorkspace() ?? localStateAvailableToAccount;
+      const mergedState = await mergeLocalWorkspaceIntoAccount(
+        latestLocalState,
+        sessionClientIdRef.current
+      );
+      clearBrowserLocalWorkspace();
+      clearKeptLocalWorkspace(authenticatedUser.id);
+      setLocalWorkspaceSnapshot(null);
+      setAccountWorkspaceSnapshot(mergedState);
+      setSessionStateAndRef(mergedState);
+      setSessionSyncError(null);
+      setIsLocalMergeOpen(false);
+    } catch (error) {
+      setLocalMergeError(
+        error instanceof Error
+          ? error.message
+          : "The local sessions could not be saved to your account."
+      );
+    } finally {
+      setIsLocalMergeBusy(false);
+    }
+  }, [
+    authenticatedUser,
+    localStateAvailableToAccount,
+    saveCurrentSessionStateNow,
+    sessionClientIdRef,
+    setSessionStateAndRef
+  ]);
   const handleSessionPersistenceRetry = useCallback(() => {
     setSessionSyncError(null);
     setSessionSyncRetryVersion((current) => current + 1);
@@ -1024,27 +1193,130 @@ export default function App() {
     composerSessionDrafts.capture();
     handleNewSession();
   }, [composerSessionDrafts, handleNewSession]);
-  const handleSidebarSelectSession = useCallback(
-    (sessionId: string) => {
-      composerSessionDrafts.capture();
+  const workspaceSelectionPendingRef = useRef<{
+    scope: AuthenticatedWorkspaceScope;
+    sessionId: string;
+  } | null>(null);
+  const switchAuthenticatedWorkspace = useCallback(
+    async (scope: AuthenticatedWorkspaceScope, sessionId: string) => {
+      if (
+        !authenticatedUser ||
+        scope === authenticatedWorkspaceScope ||
+        isWorkspaceSwitching
+      ) {
+        return;
+      }
+      setIsWorkspaceSwitching(true);
+      const saveOutcome = await saveCurrentSessionStateNow();
+      if (saveOutcome === "failed") {
+        setSessionSyncError(
+          "Sessions could not sync before switching workspace."
+        );
+        setIsWorkspaceSwitching(false);
+        return;
+      }
+
+      if (authenticatedWorkspaceScope === "local") {
+        setLocalWorkspaceSnapshot(
+          meaningfulLocalState(sessionStateRef.current)
+        );
+      } else {
+        setAccountWorkspaceSnapshot(sessionStateRef.current);
+      }
+      workspaceSelectionPendingRef.current = { scope, sessionId };
+      resetSessionState();
+      setAuthenticatedWorkspaceScope(scope);
       requestSidebarSessionSelection(sessionId);
     },
-    [composerSessionDrafts, requestSidebarSessionSelection]
+    [
+      authenticatedUser,
+      authenticatedWorkspaceScope,
+      isWorkspaceSwitching,
+      requestSidebarSessionSelection,
+      resetSessionState,
+      saveCurrentSessionStateNow,
+      sessionStateRef
+    ]
+  );
+  const handleSidebarSelectSession = useCallback(
+    (sessionId: string, local: boolean) => {
+      composerSessionDrafts.capture();
+      if (
+        authenticatedUser &&
+        local !== (authenticatedWorkspaceScope === "local")
+      ) {
+        void switchAuthenticatedWorkspace(
+          local ? "local" : "account",
+          sessionId
+        );
+        return;
+      }
+      requestSidebarSessionSelection(sessionId);
+    },
+    [
+      authenticatedUser,
+      authenticatedWorkspaceScope,
+      composerSessionDrafts,
+      requestSidebarSessionSelection,
+      switchAuthenticatedWorkspace
+    ]
   );
   const handleSidebarDeleteSession = useCallback(
-    (sessionId: string) => {
+    (sessionId: string, local: boolean) => {
+      if (
+        authenticatedUser &&
+        local !== (authenticatedWorkspaceScope === "local")
+      ) {
+        return;
+      }
       composerSessionDrafts.capture();
       const outcome = handleDeleteSession(sessionId);
       if (outcome === "deleted" || outcome === "tombstoned-only") {
         composerSessionDrafts.discardSession(sessionId);
       }
     },
-    [composerSessionDrafts, handleDeleteSession]
+    [
+      authenticatedUser,
+      authenticatedWorkspaceScope,
+      composerSessionDrafts,
+      handleDeleteSession
+    ]
   );
 
+  useEffect(() => {
+    const pending = workspaceSelectionPendingRef.current;
+    if (
+      !pending ||
+      pending.scope !== authenticatedWorkspaceScope ||
+      !sessionsLoaded
+    ) {
+      return;
+    }
+    setIsWorkspaceSwitching(false);
+    if (sessionsHydrated) {
+      workspaceSelectionPendingRef.current = null;
+    }
+  }, [authenticatedWorkspaceScope, sessionsHydrated, sessionsLoaded]);
+
   const sidebarPreview =
-    !sessionsLoaded && sessionListPreview ? sessionListPreview : null;
-  const sidebarSessionItems = sidebarPreview?.sessions ?? sessionItems;
+    !browserLocalWorkspace && !sessionsLoaded && sessionListPreview
+      ? sessionListPreview
+      : null;
+  const currentSidebarItems = sidebarPreview?.sessions ?? sessionItems;
+  const accountSidebarItems =
+    authenticatedWorkspaceScope === "account"
+      ? currentSidebarItems
+      : deriveSessionListItems(accountWorkspaceSnapshot?.sessions ?? []);
+  const localSidebarItems =
+    authenticatedWorkspaceScope === "local"
+      ? currentSidebarItems
+      : deriveSessionListItems(localStateAvailableToAccount?.sessions ?? []);
+  const sidebarSessionItems = authenticatedUser
+    ? [
+        ...accountSidebarItems.map((session) => ({ ...session, local: false })),
+        ...localSidebarItems.map((session) => ({ ...session, local: true }))
+      ]
+    : currentSidebarItems;
   const sidebarActiveSessionId =
     sidebarPreview?.activeSessionId ?? sessionState.activeSessionId;
   return (
@@ -1064,8 +1336,12 @@ export default function App() {
             <SessionSidebar
               sessions={sidebarSessionItems}
               activeSessionId={sidebarActiveSessionId}
+              activeSessionLocal={
+                Boolean(authenticatedUser) &&
+                authenticatedWorkspaceScope === "local"
+              }
               isSending={isSending}
-              isSessionSelectionBlocked={false}
+              isSessionSelectionBlocked={isWorkspaceSwitching}
               themeMode={themeMode}
               apiSettings={apiSettings}
               searchSettings={searchSettings}
@@ -1138,6 +1414,16 @@ export default function App() {
           onSignIn={handleAuthChoiceSignIn}
           onContinueLocal={handleContinueLocal}
           required={authRequired}
+        />
+      ) : null}
+      {isLocalMergeOpen && localStateAvailableToAccount ? (
+        <LocalSessionMergeDialog
+          themeMode={themeMode}
+          sessionCount={localStateAvailableToAccount.sessions.length}
+          isMerging={isLocalMergeBusy}
+          error={localMergeError}
+          onMerge={() => void handleMergeLocalWorkspace()}
+          onKeepLocal={handleKeepLocalWorkspace}
         />
       ) : null}
       {isBugReportOpen && bugReportSession ? (

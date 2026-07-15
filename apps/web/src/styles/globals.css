@@ -765,6 +765,29 @@ button {
   background: #2f2f32;
 }
 
+.session-title-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.session-location-icon {
+  flex: 0 0 auto;
+  color: #71717a;
+}
+
+.session-list-item.is-active .session-location-icon {
+  color: #3f3f46;
+}
+
+.auth-choice-primary:disabled,
+.auth-choice-secondary:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
 .auth-choice-secondary {
   border: 1px solid #d4d4d8;
   color: #18181b;
@@ -779,6 +802,31 @@ button {
   color: #8e8e93;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.local-session-merge-dialog {
+  width: min(460px, calc(100vw - 32px));
+}
+
+.local-session-merge-error {
+  margin: -6px 0 0;
+  padding: 10px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  color: #b42318;
+  background: #fff1f0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.local-session-merge-spinner {
+  animation: local-session-merge-spin 800ms linear infinite;
+}
+
+@keyframes local-session-merge-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .auth-choice-overlay[data-theme="night"] .auth-choice-dialog {
@@ -821,6 +869,12 @@ button {
 .auth-choice-overlay[data-theme="night"] .auth-choice-heading p,
 .auth-choice-overlay[data-theme="night"] .auth-choice-footnote {
   color: #a1a1aa;
+}
+
+.auth-choice-overlay[data-theme="night"] .local-session-merge-error {
+  border-color: #7f1d1d;
+  color: #fecaca;
+  background: #451a1a;
 }
 
 .settings-overlay {
