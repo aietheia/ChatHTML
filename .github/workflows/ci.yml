@@ -23,5 +23,5 @@ jobs:
       - run: npm test
       - run: npm run test:webdemo
       - run: npm run build
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e -- --project=chromium
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npm run test:e2e
