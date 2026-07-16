@@ -70,8 +70,10 @@ import {
   loadSessionClientId,
   saveCachedSessionListPreview
 } from "./features/sessions/sessionPersistence";
+import { normalizeAdminSessionArchive } from "./features/sessions/adminSessionArchive";
 import {
   deleteSessionFile,
+  requestAdminSessions,
   requestSessions,
   saveSerializedSessionState,
   saveSessionStateOnPageExit,
@@ -247,6 +249,9 @@ export default function App() {
     authenticatedUser
       ? authenticatedWorkspaceScope === "local"
       : accountMode === "local" && apiSettings.apiKeySource === "manual";
+  const adminSessionArchive = Boolean(
+    authenticatedUser?.role === "admin" && !browserLocalWorkspace
+  );
   const browserDirectProvider = usesBrowserDirectProvider(apiSettings);
   const sessionAccessEnabled = Boolean(
     runtimeSettings &&
@@ -304,11 +309,17 @@ export default function App() {
             requestSessions: () => requestBrowserLocalWorkspace(),
             loadLegacyState: () => null
           }
-        : {
-            requestSessions,
-            loadLegacyState: loadLegacyLocalSessionState
-          },
-    [browserLocalWorkspace]
+        : adminSessionArchive
+          ? {
+              requestSessions: requestAdminSessions,
+              normalizeServerState: normalizeAdminSessionArchive,
+              loadLegacyState: () => null
+            }
+          : {
+              requestSessions,
+              loadLegacyState: loadLegacyLocalSessionState
+            },
+    [adminSessionArchive, browserLocalWorkspace]
   );
   const sessionSaveDependencies = useMemo(
     () =>
@@ -400,8 +411,11 @@ export default function App() {
   });
   attachmentDraftsRef.current = hasComposerAttachmentDrafts;
   sessionSaveReadyRef.current =
-    !isAuthenticatedUserChanging && sessionsLoaded && sessionsHydrated;
-  sessionNewOrDeleteBlockedRef.current = isSending;
+    !adminSessionArchive &&
+    !isAuthenticatedUserChanging &&
+    sessionsLoaded &&
+    sessionsHydrated;
+  sessionNewOrDeleteBlockedRef.current = isSending || adminSessionArchive;
   sessionSelectionBlockedRef.current = false;
   const handleAuthOverlayRequest = useCallback(() => {
     pendingVisualRepairSlot.clear();
@@ -571,7 +585,8 @@ export default function App() {
     enabled:
       sessionAccessEnabled &&
       !isAuthenticatedUserChanging &&
-      !browserLocalWorkspace,
+      !browserLocalWorkspace &&
+      !adminSessionArchive,
     cacheEnabled: Boolean(runtimeSettings && !authRequired),
     sessionState,
     sessionsHydrated,
@@ -609,6 +624,7 @@ export default function App() {
     sessionAccessEnabled &&
       !isAuthenticatedUserChanging &&
       !isLocalMergeBusy &&
+      !adminSessionArchive &&
       sessionsLoaded,
     setSessionStateAndRef
   );
@@ -617,6 +633,7 @@ export default function App() {
     sessionState,
     sessionsLoaded:
       sessionAccessEnabled &&
+      !adminSessionArchive &&
       !isAuthenticatedUserChanging &&
       !isLocalMergeBusy &&
       sessionsLoaded &&
@@ -662,6 +679,7 @@ export default function App() {
   useEffect(() => {
     if (
       !authenticatedUser ||
+      authenticatedUser.role === "admin" ||
       isAuthenticatedUserChanging ||
       authenticatedWorkspaceScope !== "account" ||
       !sessionsLoaded ||
@@ -762,7 +780,7 @@ export default function App() {
 
   useGeneratedArtifactBatchRecovery({
     sessions: sessionState.sessions,
-    sessionsLoaded,
+    sessionsLoaded: sessionsLoaded && !adminSessionArchive,
     sessionStateRef,
     cancelledRunIdsRef,
     themeMode,
@@ -1131,7 +1149,8 @@ export default function App() {
   });
 
   useRestoredChatRuns({
-    sessionsLoaded: sessionsLoaded && !browserLocalWorkspace,
+    sessionsLoaded:
+      sessionsLoaded && !browserLocalWorkspace && !adminSessionArchive,
     sessions: sessionState.sessions,
     sessionStateRef,
     sessionClientIdRef,
@@ -1179,6 +1198,9 @@ export default function App() {
 
   const handleNewMessage = useCallback(
     async (message: AppendMessage) => {
+      if (adminSessionArchive) {
+        return;
+      }
       if (
         isAttachmentSendBlocked ||
         composerAttachmentSafetyBlockedRef.current
@@ -1261,6 +1283,7 @@ export default function App() {
     },
     [
       activeSessionIdRef,
+      adminSessionArchive,
       clearArtifactSelections,
       isAttachmentSendBlocked,
       getArtifactSelections,
@@ -1278,6 +1301,7 @@ export default function App() {
       isLocalArtifactEditRunning ||
       isVisualRepairRunning,
     isSendDisabled:
+      adminSessionArchive ||
       isSending ||
       isAttachmentSendBlocked ||
       composerAttachmentSafetyBlocked,
@@ -1460,6 +1484,7 @@ export default function App() {
                 authenticatedWorkspaceScope === "local"
               }
               isSending={isSending}
+              readOnly={adminSessionArchive}
               isSessionSelectionBlocked={isWorkspaceSwitching}
               themeMode={themeMode}
               apiSettings={apiSettings}
@@ -1496,8 +1521,9 @@ export default function App() {
             themeMode={themeMode}
             showRawStream={displaySettings.showRawStream}
             artifactEditingEnabled={
-              displaySettings.artifactEditingEnabled
+              displaySettings.artifactEditingEnabled && !adminSessionArchive
             }
+            readOnly={adminSessionArchive}
             model={activeSessionModel}
             modelOptions={selectableModels}
             reasoningEffort={activeSessionReasoningEffort}

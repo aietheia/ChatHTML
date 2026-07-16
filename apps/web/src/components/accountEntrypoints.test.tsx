@@ -16,7 +16,8 @@ function renderSidebar(
   authenticated: boolean,
   accountMode: AccountMode = "unselected",
   cloudEnabled = true,
-  includeLocalSession = false
+  includeLocalSession = false,
+  readOnly = false
 ): string {
   return renderToStaticMarkup(
     <SessionSidebar
@@ -27,6 +28,7 @@ function renderSidebar(
       }
       activeSessionId=""
       isSending={false}
+      readOnly={readOnly}
       isSessionSelectionBlocked={false}
       themeMode="day"
       apiSettings={DEFAULT_API_SETTINGS}
@@ -128,5 +130,11 @@ describe("account entry points", () => {
       renderSidebar(false, "local", true, true),
       /aria-label="Stored on this device"/
     );
+  });
+
+  it("disables new-session controls in the read-only admin archive", () => {
+    const sidebar = renderSidebar(true, "unselected", true, false, true);
+
+    assert.match(sidebar, /class="new-session-button"[^>]*disabled=""/);
   });
 });

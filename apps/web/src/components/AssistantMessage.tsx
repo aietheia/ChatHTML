@@ -38,6 +38,7 @@ type AssistantMessageProps = {
   themeMode: PageThemeMode;
   showRawStream: boolean;
   artifactEditingEnabled: boolean;
+  readOnly?: boolean;
   status?: "streaming" | "complete" | "error";
   generationOutcome?: "complete" | "error" | "cancelled";
   error?: string;
@@ -104,6 +105,7 @@ export function AssistantMessage({
   themeMode,
   showRawStream,
   artifactEditingEnabled,
+  readOnly = false,
   status,
   generationOutcome,
   error,
@@ -213,7 +215,7 @@ export function AssistantMessage({
     Boolean(artifactVersionInfo),
     Boolean(branchInfo)
   );
-  const turnActions = (
+  const turnActions = readOnly ? null : (
     <div className="assistant-turn-actions" aria-label="Response actions">
       {artifactEditingEnabled && hasVisibleArtifact ? (
         <button

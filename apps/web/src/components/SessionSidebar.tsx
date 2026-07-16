@@ -47,6 +47,7 @@ type SessionSidebarProps = {
   activeSessionId: string;
   activeSessionLocal?: boolean;
   isSending: boolean;
+  readOnly?: boolean;
   isSessionSelectionBlocked: boolean;
   themeMode: ThemeMode;
   apiSettings: ApiSettings;
@@ -80,6 +81,7 @@ export function SessionSidebar({
   activeSessionId,
   activeSessionLocal = false,
   isSending,
+  readOnly = false,
   isSessionSelectionBlocked,
   themeMode,
   apiSettings,
@@ -275,7 +277,7 @@ export function SessionSidebar({
             <button
               className="collapsed-sidebar-button"
               type="button"
-              disabled={isSending}
+              disabled={isSending || readOnly}
               aria-label="New session"
               onClick={() => {
                 if (isCompactSidebar) {
@@ -354,7 +356,7 @@ export function SessionSidebar({
             <button
               className="new-session-button"
               type="button"
-              disabled={isSending}
+              disabled={isSending || readOnly}
               onClick={() => {
                 if (isCompactSidebar) {
                   setIsCollapsed(true);
@@ -373,7 +375,7 @@ export function SessionSidebar({
               const isActive =
                 session.id === activeSessionId && isLocal === activeSessionLocal;
               const menuId = `${isLocal ? "local" : "account"}:${session.id}`;
-              const canManage = isLocal === activeSessionLocal;
+              const canManage = !readOnly && isLocal === activeSessionLocal;
               return (
               <div
                 key={menuId}

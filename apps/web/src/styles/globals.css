@@ -5216,6 +5216,26 @@ button {
     width var(--thinking-activity-transition);
 }
 
+.admin-session-read-only {
+  width: fit-content;
+  margin: 0 auto;
+  padding: 8px 14px;
+  border: 1px solid #dedee3;
+  border-radius: 999px;
+  color: #52525b;
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  box-shadow: 0 4px 16px rgba(24, 24, 27, 0.06);
+}
+
+.app-shell[data-theme="night"] .admin-session-read-only {
+  border-color: #44444a;
+  color: #d4d4d8;
+  background: rgba(39, 39, 42, 0.92);
+}
+
 .thread-root.is-thinking-activity-open .composer-footer.has-messages {
   left: calc((100% - var(--thinking-panel-width)) / 2);
   width: min(760px, calc(100% - var(--thinking-panel-width) - 48px));
