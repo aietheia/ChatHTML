@@ -7,6 +7,7 @@ import type { Server } from "node:http";
 import {
   DEFAULT_CHATHTML_SERVICE_BASE_URL,
   createChatHtmlServiceGateway,
+  getAuthenticatedServiceUser,
   getAuthenticatedStateKey
 } from "./chatHtmlService.js";
 
@@ -15,13 +16,15 @@ const servers: Server[] = [];
 async function startGateway(
   fetchImpl: typeof fetch,
   nodeEnv = "test",
-  publicOrigin = "http://chat.test"
+  publicOrigin = "http://chat.test",
+  adminUserIds: readonly string[] = []
 ) {
   const gateway = createChatHtmlServiceGateway({
     baseUrl: "http://service.test/v1",
     fetchImpl,
     nodeEnv,
-    publicOrigin
+    publicOrigin,
+    adminUserIds
   });
   const app = express();
   app.use(express.json());
@@ -33,6 +36,9 @@ async function startGateway(
   app.post("/api/auth/logout", gateway.handleAuthLogout);
   app.get("/protected", gateway.requireAuthenticatedUser, (req, res) => {
     res.json({ stateKey: getAuthenticatedStateKey(req) });
+  });
+  app.get("/identity", gateway.requireAuthenticatedUser, (req, res) => {
+    res.json({ user: getAuthenticatedServiceUser(req) });
   });
   app.post("/managed", gateway.injectManagedApiSettings, (req, res) => {
     res.json(req.body);
@@ -101,6 +107,77 @@ describe("ChatHTML Service gateway", () => {
       headers: { Cookie: `chathtml_service_session=${revokedToken}` }
     });
     assert.equal(revoked.status, 401);
+  });
+
+  it("fails closed for Service admins that are not explicitly allowlisted", async () => {
+    const usersByToken = new Map([
+      [
+        "legacy-admin-token-abcdefghijklmnopqrstuvwxyz",
+        {
+          id: "legacy-first-user",
+          email: "first@example.com",
+          role: "admin" as const
+        }
+      ],
+      [
+        "dedicated-admin-token-abcdefghijklmnopqrstuvwxyz",
+        {
+          id: "dedicated-admin",
+          email: "admin@example.com",
+          role: "admin" as const
+        }
+      ]
+    ]);
+    const origin = await startGateway(
+      async (_input, init) => {
+        const authorization =
+          new Headers(init?.headers).get("authorization") ?? "";
+        const token = authorization.replace(/^Bearer\s+/i, "");
+        const user = usersByToken.get(token);
+        return user
+          ? Response.json({ user })
+          : Response.json({ error: "Unauthorized" }, { status: 401 });
+      },
+      "production",
+      "http://chat.test",
+      ["dedicated-admin"]
+    );
+
+    const legacyCookie =
+      "chathtml_service_session=legacy-admin-token-abcdefghijklmnopqrstuvwxyz";
+    const legacySummary = await fetch(`${origin}/api/auth/me`, {
+      headers: { Cookie: legacyCookie }
+    });
+    assert.equal(legacySummary.status, 200);
+    assert.equal(
+      ((await legacySummary.json()) as { user: { role: string } }).user.role,
+      "user"
+    );
+    const legacyIdentity = await fetch(`${origin}/identity`, {
+      headers: { Cookie: legacyCookie }
+    });
+    assert.equal(
+      ((await legacyIdentity.json()) as { user: { role: string } }).user.role,
+      "user"
+    );
+
+    const dedicatedCookie =
+      "chathtml_service_session=dedicated-admin-token-abcdefghijklmnopqrstuvwxyz";
+    const dedicatedSummary = await fetch(`${origin}/api/auth/me`, {
+      headers: { Cookie: dedicatedCookie }
+    });
+    assert.equal(dedicatedSummary.status, 200);
+    assert.equal(
+      ((await dedicatedSummary.json()) as { user: { role: string } }).user.role,
+      "admin"
+    );
+    const dedicatedIdentity = await fetch(`${origin}/identity`, {
+      headers: { Cookie: dedicatedCookie }
+    });
+    assert.equal(
+      ((await dedicatedIdentity.json()) as { user: { role: string } }).user.role,
+      "admin"
+    );
   });
 
   it("keeps OAuth callbacks and transient cookies inside a deployment subpath", async () => {

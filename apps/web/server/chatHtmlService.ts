@@ -67,6 +67,7 @@ export type ChatHtmlServiceGatewayOptions = {
   nodeEnv?: string;
   publicOrigin?: string;
   appRedirectUri?: string;
+  adminUserIds?: readonly string[];
 };
 
 class ServiceHttpError extends Error {
@@ -255,7 +256,20 @@ async function requireSuccessfulJson(
   return payload;
 }
 
-function asAuthSession(payload: unknown): ServiceAuthSession {
+function restrictAdminRole(
+  user: ServiceUser,
+  adminUserIds: ReadonlySet<string>
+): ServiceUser {
+  if (user.role !== "admin" || adminUserIds.has(user.id)) {
+    return user;
+  }
+  return { ...user, role: "user" };
+}
+
+function asAuthSession(
+  payload: unknown,
+  adminUserIds: ReadonlySet<string>
+): ServiceAuthSession {
   const value = payload as Partial<ServiceAuthSession> | null;
   if (
     !value?.user ||
@@ -269,10 +283,16 @@ function asAuthSession(payload: unknown): ServiceAuthSession {
   ) {
     throw new Error("ChatHTML Service returned an invalid authentication session.");
   }
-  return value as ServiceAuthSession;
+  return {
+    ...(value as ServiceAuthSession),
+    user: restrictAdminRole(value.user, adminUserIds)
+  };
 }
 
-function asUser(payload: unknown): ServiceUser {
+function asUser(
+  payload: unknown,
+  adminUserIds: ReadonlySet<string>
+): ServiceUser {
   const value = payload as { user?: ServiceUser } | null;
   if (
     !value?.user ||
@@ -282,7 +302,7 @@ function asUser(payload: unknown): ServiceUser {
   ) {
     throw new Error("ChatHTML Service returned an invalid user.");
   }
-  return value.user;
+  return restrictAdminRole(value.user, adminUserIds);
 }
 
 function asAvailability(payload: unknown): AuthAvailability {
@@ -342,6 +362,13 @@ export function createChatHtmlServiceGateway(
       process.env.CHATHTML_APP_OAUTH_REDIRECT_URI ??
       DEFAULT_CHATHTML_APP_OAUTH_REDIRECT_URI
   );
+  const adminUserIds = new Set(
+    (options.adminUserIds ??
+      process.env.CHATHTML_ADMIN_USER_IDS?.split(",") ??
+      [])
+      .map((value) => value.trim())
+      .filter(Boolean)
+  );
   const serviceOrigin = new URL(baseUrl).origin;
   // Never positively cache token introspection. Password recovery, password
   // changes, logout, and account deletion revoke Service sessions; a positive
@@ -382,7 +409,8 @@ export function createChatHtmlServiceGateway(
       return null;
     }
     const user = asUser(
-      await requireSuccessfulJson(response, "Could not authenticate the request.")
+      await requireSuccessfulJson(response, "Could not authenticate the request."),
+      adminUserIds
     );
     return user;
   };
@@ -574,7 +602,8 @@ export function createChatHtmlServiceGateway(
         })
       });
       const session = asAuthSession(
-        await requireSuccessfulJson(response, "OAuth token exchange failed.")
+        await requireSuccessfulJson(response, "OAuth token exchange failed."),
+        adminUserIds
       );
       clearOAuthCookies();
       res.append(
