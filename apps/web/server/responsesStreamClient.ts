@@ -1,5 +1,9 @@
 import type { ApiKeySource, RuntimeReasoningEffort } from "./runtimeApiSettings.js";
 import { createProviderAuthorizationHeaders } from "./providerEndpointTrust.js";
+import {
+  createOpenRouterAttributionHeaders,
+  isOpenRouterProvider
+} from "../src/core/openRouterAttribution.js";
 import type { ResponsesToolDefinition } from "./sessionFileTools.js";
 import {
   ResponsesTerminalFailureError,
@@ -57,10 +61,7 @@ export type StreamResponsesOnceOptions = {
 export function isOpenRouterRuntime(
   settings: Pick<ResponsesHttpErrorContext, "providerName" | "baseUrl">
 ): boolean {
-  return (
-    /openrouter/i.test(settings.providerName) ||
-    settings.baseUrl.toLowerCase().includes("openrouter.ai")
-  );
+  return isOpenRouterProvider(settings);
 }
 
 export function isOpenAiRuntime(
@@ -350,8 +351,7 @@ export async function streamResponsesOnce({
           "responses"
         ),
         "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost:5173",
-        "X-Title": "ChatHTML Runtime Demo"
+        ...createOpenRouterAttributionHeaders(apiSettings)
       },
       redirect: "error",
       signal,

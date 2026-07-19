@@ -1,4 +1,5 @@
 import { createProviderAuthorizationHeaders } from "./providerEndpointTrust.js";
+import { createOpenRouterAttributionHeaders } from "../src/core/openRouterAttribution.js";
 import {
   ResponsesTerminalFailureError,
   extractResponsesErrorMessage,
@@ -361,8 +362,7 @@ export async function streamChatCompletionsOnce({
           "chat-completions"
         ),
         "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost:5173",
-        "X-Title": "ChatHTML Runtime Demo"
+        ...createOpenRouterAttributionHeaders(apiSettings)
       },
       redirect: "error",
       signal,

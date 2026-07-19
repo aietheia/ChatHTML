@@ -28,6 +28,35 @@ function state() {
 }
 
 describe("Chat Completions stream client", () => {
+  it("attributes OpenRouter Chat Completions requests to ChatHTML", async () => {
+    let requestHeaders = new Headers();
+    await streamChatCompletionsOnce({
+      endpoint: "https://openrouter.ai/api/v1/chat/completions",
+      apiSettings: {
+        ...apiSettings,
+        providerName: "OpenRouter",
+        baseUrl: "https://openrouter.ai/api/v1"
+      },
+      input: [],
+      instructions: "Answer.",
+      tools: [],
+      emit: () => undefined,
+      state: state(),
+      signal: new AbortController().signal,
+      useOpenRouterReasoning: false,
+      fetchImpl: async (_input, init) => {
+        requestHeaders = new Headers(init?.headers);
+        return new Response("data: [DONE]\n", { status: 200 });
+      }
+    });
+
+    assert.equal(
+      requestHeaders.get("HTTP-Referer"),
+      "https://chat.aietheia.com"
+    );
+    assert.equal(requestHeaders.get("X-OpenRouter-Title"), "ChatHTML");
+  });
+
   it("derives the standard endpoint and converts Responses history", () => {
     assert.equal(
       getChatCompletionsEndpoint("https://provider.example/v1/"),
@@ -85,6 +114,7 @@ describe("Chat Completions stream client", () => {
     const events: Array<{ type: string; text: string }> = [];
     const streamState = state();
     let requestBody: Record<string, unknown> | undefined;
+    let requestHeaders = new Headers();
     const calls = await streamChatCompletionsOnce({
       endpoint: "https://provider.example/v1/chat/completions",
       apiSettings,
@@ -110,6 +140,7 @@ describe("Chat Completions stream client", () => {
       signal: new AbortController().signal,
       useOpenRouterReasoning: true,
       fetchImpl: async (_input, init) => {
+        requestHeaders = new Headers(init?.headers);
         requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
         return new Response(
           [
@@ -125,6 +156,8 @@ describe("Chat Completions stream client", () => {
     });
 
     assert.equal(requestBody?.max_tokens, 16_000);
+    assert.equal(requestHeaders.get("HTTP-Referer"), null);
+    assert.equal(requestHeaders.get("X-OpenRouter-Title"), null);
     assert.equal(Array.isArray(requestBody?.messages), true);
     assert.deepEqual(requestBody?.reasoning, { effort: "low" });
     assert.deepEqual(events, [

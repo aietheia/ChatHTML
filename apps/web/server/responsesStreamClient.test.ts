@@ -90,6 +90,23 @@ async function collectStream(
 }
 
 describe("Responses stream client", () => {
+  it("attributes OpenRouter Responses requests to ChatHTML", async () => {
+    let requestHeaders = new Headers();
+    await collectStream(["data: [DONE]\n"], {
+      fetchImpl: async (_input, init) => {
+        requestHeaders = new Headers(init?.headers);
+        return new Response("data: [DONE]\n", { status: 200 });
+      }
+    });
+
+    assert.equal(
+      requestHeaders.get("HTTP-Referer"),
+      "https://chat.aietheia.com"
+    );
+    assert.equal(requestHeaders.get("X-OpenRouter-Title"), "ChatHTML");
+    assert.equal(requestHeaders.get("X-Title"), null);
+  });
+
   it("parses SSE JSON split across chunks and flushes a final line without newline", async () => {
     const first = JSON.stringify({
       type: "response.output_text.delta",

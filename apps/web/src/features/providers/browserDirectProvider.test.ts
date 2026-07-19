@@ -73,6 +73,8 @@ describe("browser-direct provider transport", () => {
     assert.equal(calls[0].init?.referrerPolicy, "no-referrer");
     const headers = calls[0].init?.headers as Record<string, string>;
     assert.equal(headers.Authorization, "Bearer sk-private-browser-key");
+    assert.equal(headers["HTTP-Referer"], "https://chat.aietheia.com");
+    assert.equal(headers["X-OpenRouter-Title"], "ChatHTML");
     const body = String(calls[0].init?.body);
     assert.doesNotMatch(body, /sk-private-browser-key/);
     assert.match(body, /vendor\/model/);
@@ -152,6 +154,9 @@ describe("browser-direct provider transport", () => {
           String(input),
           "https://provider.example/v1/chat/completions"
         );
+        const headers = init?.headers as Record<string, string>;
+        assert.equal(headers["HTTP-Referer"], "https://chat.aietheia.com");
+        assert.equal(headers["X-OpenRouter-Title"], "ChatHTML");
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
         assert.equal("messages" in body, true);
         return Response.json({
@@ -181,6 +186,14 @@ describe("browser-direct provider transport", () => {
     assert.equal(
       (calls[0].init?.headers as Record<string, string>).Authorization,
       "Bearer sk-private-browser-key"
+    );
+    assert.equal(
+      (calls[0].init?.headers as Record<string, string>)["HTTP-Referer"],
+      "https://chat.aietheia.com"
+    );
+    assert.equal(
+      (calls[0].init?.headers as Record<string, string>)["X-OpenRouter-Title"],
+      "ChatHTML"
     );
   });
 

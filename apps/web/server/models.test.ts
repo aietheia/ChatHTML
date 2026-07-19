@@ -89,10 +89,12 @@ describe("models endpoint credential safety", () => {
     process.env.OPENROUTER_API_KEY = "canonical-server-key";
     let receivedUrl = "";
     let receivedAuthorization = "";
+    let receivedHeaders = new Headers();
     let receivedRedirect: RequestInit["redirect"] | undefined;
     const fetchImpl: typeof fetch = async (input, init) => {
       receivedUrl = String(input);
       receivedAuthorization = new Headers(init?.headers).get("authorization") ?? "";
+      receivedHeaders = new Headers(init?.headers);
       receivedRedirect = init?.redirect;
       return new Response(
         JSON.stringify({ data: [{ id: "model/a" }, { id: "model/b" }] }),
@@ -117,6 +119,8 @@ describe("models endpoint credential safety", () => {
 
     assert.equal(receivedUrl, "https://openrouter.ai/api/v1/models");
     assert.equal(receivedAuthorization, "Bearer canonical-server-key");
+    assert.equal(receivedHeaders.get("HTTP-Referer"), "https://chat.aietheia.com");
+    assert.equal(receivedHeaders.get("X-OpenRouter-Title"), "ChatHTML");
     assert.equal(receivedRedirect, "error");
     assert.deepEqual(response.statuses, []);
     assert.deepEqual(response.bodies, [{ models: ["model/a", "model/b"] }]);
@@ -124,8 +128,10 @@ describe("models endpoint credential safety", () => {
 
   it("preserves manual keys for custom and local model endpoints", async () => {
     let receivedAuthorization = "";
+    let receivedHeaders = new Headers();
     const fetchImpl: typeof fetch = async (_input, init) => {
-      receivedAuthorization = new Headers(init?.headers).get("authorization") ?? "";
+      receivedHeaders = new Headers(init?.headers);
+      receivedAuthorization = receivedHeaders.get("authorization") ?? "";
       return new Response('{"models":[{"name":"local/model"}]}');
     };
     const handler = createModelsHandler({ fetchImpl });
@@ -134,6 +140,8 @@ describe("models endpoint credential safety", () => {
     await handler(request(manualSettings()), response.response);
 
     assert.equal(receivedAuthorization, "Bearer manual-key");
+    assert.equal(receivedHeaders.get("HTTP-Referer"), null);
+    assert.equal(receivedHeaders.get("X-OpenRouter-Title"), null);
     assert.deepEqual(response.bodies, [{ models: ["local/model"] }]);
   });
 

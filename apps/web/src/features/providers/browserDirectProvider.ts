@@ -2,6 +2,7 @@ import {
   normalizeApiSettings,
   type ApiSettings
 } from "../../core/apiSettings";
+import { createOpenRouterAttributionHeaders } from "../../core/openRouterAttribution";
 import type { SessionFile } from "../../domain/chat/sessionModel";
 import {
   SYSTEM_PROMPT,
@@ -617,7 +618,8 @@ export async function startBrowserDirectChatRun(
       headers: {
         Authorization: `Bearer ${settings.apiKey}`,
         Accept: "text/event-stream",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        ...createOpenRouterAttributionHeaders(settings)
       },
       signal,
       body: JSON.stringify(
@@ -688,7 +690,8 @@ export async function requestBrowserDirectText(
       headers: {
         Authorization: `Bearer ${settings.apiKey}`,
         Accept: "application/json",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        ...createOpenRouterAttributionHeaders(settings)
       },
       signal,
       body: JSON.stringify(
@@ -768,7 +771,8 @@ export async function fetchBrowserDirectModelCatalog(
       referrerPolicy: "no-referrer",
       headers: {
         Authorization: `Bearer ${settings.apiKey}`,
-        Accept: "application/json"
+        Accept: "application/json",
+        ...createOpenRouterAttributionHeaders(settings)
       }
     });
   } catch (error) {

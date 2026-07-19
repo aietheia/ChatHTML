@@ -54,8 +54,8 @@ async function generateMarkdown(example) {
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
-      "HTTP-Referer": "https://github.com/aietheia/ChatHTML",
-      "X-Title": "ChatHTML README comparison"
+      "HTTP-Referer": "https://chat.aietheia.com",
+      "X-OpenRouter-Title": "ChatHTML"
     },
     body: JSON.stringify({
       model,

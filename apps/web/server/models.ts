@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { createProviderAuthorizationHeaders } from "./providerEndpointTrust.js";
+import { createOpenRouterAttributionHeaders } from "../src/core/openRouterAttribution.js";
 import {
   readRuntimeApiCredentialDescriptor,
   resolveRuntimeApiCredentials
@@ -229,7 +230,8 @@ export function createModelsHandler(options: ModelsHandlerOptions = {}) {
             credentials,
             endpoint,
             "models"
-          )
+          ),
+          ...createOpenRouterAttributionHeaders(credentials)
         },
         redirect: "error",
         signal: abortController.signal
