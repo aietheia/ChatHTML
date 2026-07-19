@@ -1,38 +1,61 @@
-<table>
-  <tr>
-    <td width="150" align="center"><img src="docs/images/chathtml-logo.png" alt="ChatHTML logo" width="112"></td>
-    <td>
-      <h1>ChatHTML</h1>
-      <p><strong>Beautiful AI responses, beyond plain Markdown.</strong></p>
-    </td>
-  </tr>
-</table>
-
-<p>
-  <a href="https://github.com/aietheia/ChatHTML/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/aietheia/ChatHTML/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/aietheia/ChatHTML/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/aietheia/ChatHTML?style=flat"></a>
-  <img alt="Node.js 22.13 or newer" src="https://img.shields.io/badge/node-%E2%89%A522.13-339933?logo=nodedotjs&logoColor=white">
-  <a href="https://chat.aietheia.com"><img alt="ChatHTML Cloud" src="https://img.shields.io/badge/ChatHTML-Cloud-7c3aed"></a>
+<p align="center">
+  <img src="docs/images/chathtml-logo.png" alt="ChatHTML" width="120" height="120" />
 </p>
 
-<p><strong>Try ChatHTML Cloud: <a href="https://chat.aietheia.com">chat.aietheia.com</a></strong></p>
+<h1 align="center">ChatHTML</h1>
 
-ChatHTML turns a prompt into a live, streaming HTML response. It progressively
-renders model-generated interfaces as they are written, so an answer can be
-explanatory, visual, interactive, or simply beautifully typeset.
+<p align="center">
+  <strong>Beautiful AI responses, beyond plain Markdown.</strong><br />
+  Turn a prompt into a live, streaming interface that can explain, visualize, and interact.
+</p>
 
-ChatHTML is focused on the response medium: it is not a ChatGPT clone and it is
-not an app-builder workflow. The chat shell exists so a normal message can
+<p align="center">
+  <a href="https://chat.aietheia.com">try here</a>
+</p>
+
+<br />
+
+<p align="center">
+  <img src="docs/images/showcase-poster-studio-rounded.png" alt="ChatHTML running an interactive poster studio" width="800" />
+</p>
+
+<p align="center">
+  <img src="docs/images/showcase-color-lab-rounded.png" alt="ChatHTML running an interactive color palette lab" width="800" />
+</p>
+
+<p align="center">
+  <img src="docs/images/showcase-bezier-playground-rounded.png" alt="ChatHTML running an interactive Bezier curve playground" width="390" />
+  &nbsp;
+  <img src="docs/images/showcase-pomodoro-rounded.png" alt="ChatHTML running an interactive Pomodoro timer" width="390" />
+</p>
+
+<p align="center">
+  <img src="docs/images/showcase-2048-rounded.png" alt="ChatHTML running a playable 2048 game" width="390" />
+  &nbsp;
+  <img src="docs/images/showcase-split-calculator-rounded.png" alt="ChatHTML running an interactive tip and split calculator" width="390" />
+</p>
+
+<br />
+
+## What is ChatHTML?
+
+ChatHTML turns a normal message into a live, streaming HTML response. It
+progressively renders model-generated interfaces as they are written, so an
+answer can be explanatory, visual, interactive, or simply beautifully typeset.
+
+It is focused on the response medium rather than reproducing a ChatGPT-style
+product or an app-builder workflow. The chat shell exists so any answer can
 become a sandboxed UI artifact.
 
-<table>
-  <tr>
-    <td width="25%" valign="top"><strong>⚡ Beautiful by default</strong><br><br>Responsive HTML, CSS, typography, and motion instead of a fenced code block.</td>
-    <td width="25%" valign="top"><strong>🧩 Interactive</strong><br><br>Forms, controls, small vanilla scripts, and buttons that continue the conversation.</td>
-    <td width="25%" valign="top"><strong>🛡️ Private &amp; contained</strong><br><br>Server keys stay server-side; generated artifacts run in a guarded sandbox.</td>
-    <td width="25%" valign="top"><strong>🚀 Built for iteration</strong><br><br>Select, edit, regenerate, repair, copy, or export the result.</td>
-  </tr>
-</table>
+- **Beautiful by default** — responsive HTML, CSS, typography, and motion instead of a fenced code block.
+- **Interactive** — forms, controls, small vanilla scripts, and buttons that continue the conversation.
+- **Private and contained** — server keys stay server-side; generated artifacts run in a guarded sandbox.
+- **Built for iteration** — select, edit, regenerate, repair, copy, or export the result.
+
+<details>
+<summary><strong>Plain Markdown vs. ChatHTML comparisons</strong></summary>
+
+<br />
 
 ## Examples: Plain Markdown vs. ChatHTML
 
@@ -156,6 +179,8 @@ The publisher wraps each saved ChatHTML response in the same sandbox document
 used by the app, then creates or updates its stable link on
 `https://chat.aietheia.com`. Omit the slugs to publish every README example; set
 `CHATHTML_README_SHARE_ORIGIN` to use another compatible host.
+
+</details>
 
 ## Get started
 
