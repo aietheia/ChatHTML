@@ -467,7 +467,7 @@ test("#24 long artifacts keep the normal edit action without a floating circle",
   ).toBeGreaterThan(0);
 });
 
-test("streaming growth keeps the composer pinned without repeated viewport corrections", async ({
+test("streaming growth keeps the composer pinned and follows the artifact bottom", async ({
   page
 }) => {
   await page.setViewportSize({ width: 1100, height: 720 });
@@ -535,6 +535,7 @@ test("streaming growth keeps the composer pinned without repeated viewport corre
           time: performance.now(),
           composerTop: rect.top,
           composerBottom: rect.bottom,
+          viewportHeight: viewport.clientHeight,
           viewportScrollTop: viewport.scrollTop,
           viewportScrollHeight: viewport.scrollHeight,
           frameHeight: frame?.getBoundingClientRect().height ?? 0
@@ -579,13 +580,8 @@ test("streaming growth keeps the composer pinned without repeated viewport corre
   );
   const composerTops = samples.map((sample) => sample.composerTop);
   const composerBottoms = samples.map((sample) => sample.composerBottom);
-  const scrollTransitions = samples.reduce((count, sample, index) => {
-    const previous = samples[index - 1];
-    return count +
-      (previous && sample.viewportScrollTop !== previous.viewportScrollTop
-        ? 1
-        : 0);
-  }, 0);
+  const finalSample = samples.at(-1);
+  const scrollPositions = samples.map((sample) => sample.viewportScrollTop);
 
   expect(Math.max(...composerTops) - Math.min(...composerTops)).toBeLessThanOrEqual(
     0.5
@@ -593,5 +589,18 @@ test("streaming growth keeps the composer pinned without repeated viewport corre
   expect(
     Math.max(...composerBottoms) - Math.min(...composerBottoms)
   ).toBeLessThanOrEqual(0.5);
-  expect(scrollTransitions).toBeLessThanOrEqual(1);
+  expect(finalSample).toBeDefined();
+  expect(finalSample!.viewportScrollTop).toBeGreaterThan(0);
+  expect(
+    Math.abs(
+      finalSample!.viewportScrollHeight -
+        finalSample!.viewportHeight -
+        finalSample!.viewportScrollTop
+    )
+  ).toBeLessThanOrEqual(2);
+  expect(
+    scrollPositions.every(
+      (position, index) => index === 0 || position >= scrollPositions[index - 1]
+    )
+  ).toBe(true);
 });

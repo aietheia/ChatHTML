@@ -73,7 +73,6 @@ export type StreamThreadProps = {
   onUiComplexityChange(uiComplexity: number): void;
 };
 
-const SESSION_OUTPUT_SCROLL_RETRY_MS = [80, 240, 520];
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 160;
 const THINKING_ACTIVITY_ANIMATION_MS = 220;
 
@@ -89,30 +88,6 @@ function scrollToBottom(viewport: HTMLElement): void {
     top: Math.max(0, viewport.scrollHeight - viewport.clientHeight),
     behavior: "auto"
   });
-}
-
-function scrollToLastOutputStart(viewport: HTMLElement): boolean {
-  const outputs = Array.from(
-    viewport.querySelectorAll<HTMLElement>(".assistant-canvas")
-  );
-  const assistantRows = Array.from(
-    viewport.querySelectorAll<HTMLElement>(".chat-row.assistant")
-  );
-  const target =
-    outputs[outputs.length - 1] ?? assistantRows[assistantRows.length - 1];
-
-  if (!target) {
-    return false;
-  }
-
-  const viewportRect = viewport.getBoundingClientRect();
-  const targetRect = target.getBoundingClientRect();
-  const paddingTop = Number.parseFloat(getComputedStyle(viewport).paddingTop) || 0;
-  const top =
-    viewport.scrollTop + targetRect.top - viewportRect.top - paddingTop;
-
-  viewport.scrollTo({ top: Math.max(0, top), behavior: "auto" });
-  return true;
 }
 
 export function StreamThread({
@@ -301,23 +276,52 @@ export function StreamThread({
       return undefined;
     }
 
-    let didPositionOutput = false;
-    const positionOutputOnce = () => {
-      if (didPositionOutput) {
+    shouldFollowBottomRef.current = true;
+    let animationFrameId: number | null = null;
+    const followStreamingBottom = () => {
+      if (!shouldFollowBottomRef.current || animationFrameId !== null) {
         return;
       }
-      didPositionOutput = scrollToLastOutputStart(viewport);
+      animationFrameId = window.requestAnimationFrame(() => {
+        animationFrameId = null;
+        if (shouldFollowBottomRef.current) {
+          scrollToBottom(viewport);
+        }
+      });
     };
-    const timeoutIds: number[] = [];
-    const animationFrameId = window.requestAnimationFrame(positionOutputOnce);
-
-    SESSION_OUTPUT_SCROLL_RETRY_MS.forEach((delay) => {
-      timeoutIds.push(window.setTimeout(positionOutputOnce, delay));
-    });
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(followStreamingBottom);
+    let observedStreamingRow: HTMLElement | null = null;
+    const observeStreamingRow = () => {
+      const assistantRows = viewport.querySelectorAll<HTMLElement>(
+        ".chat-row.assistant"
+      );
+      const nextStreamingRow = assistantRows.item(assistantRows.length - 1);
+      if (nextStreamingRow === observedStreamingRow) {
+        return;
+      }
+      if (observedStreamingRow) {
+        resizeObserver?.unobserve(observedStreamingRow);
+      }
+      observedStreamingRow = nextStreamingRow;
+      if (observedStreamingRow) {
+        resizeObserver?.observe(observedStreamingRow);
+        followStreamingBottom();
+      }
+    };
+    const mutationObserver = new MutationObserver(observeStreamingRow);
+    mutationObserver.observe(viewport, { childList: true, subtree: true });
+    observeStreamingRow();
+    followStreamingBottom();
 
     return () => {
-      window.cancelAnimationFrame(animationFrameId);
-      timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+      mutationObserver.disconnect();
+      resizeObserver?.disconnect();
     };
   }, [activeSessionId, hasStreamingMessage]);
 
