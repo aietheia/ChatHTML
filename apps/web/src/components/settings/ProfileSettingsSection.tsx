@@ -11,6 +11,18 @@ import type { AuthUser } from "../../core/cloudAuth";
 import type { ProfileSettings } from "../../core/profileSettings";
 import { ProfileAvatar } from "../ProfileAvatar";
 
+const usdFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 2
+});
+
+function parseUsd(value: string | undefined, fallback: number): number {
+  const parsedValue = Number(value);
+  return Number.isFinite(parsedValue) ? parsedValue : fallback;
+}
+
 type ProfileSettingsSectionProps = {
   apiSettings: ApiSettings;
   profileSettings: ProfileSettings;
@@ -62,6 +74,12 @@ export function ProfileSettingsSection({
 }: ProfileSettingsSectionProps) {
   const [recoveryCode, setRecoveryCode] = useState("");
   const [recoveryError, setRecoveryError] = useState("");
+  const spentUsd = parseUsd(authUser?.spentInWindowUsd, 0);
+  const usageLimitUsd = parseUsd(authUser?.usageLimitUsd, 20);
+  const usagePercent =
+    usageLimitUsd > 0
+      ? Math.min(100, Math.max(0, (spentUsd / usageLimitUsd) * 100))
+      : 0;
   return (
     <>
       <div className="settings-profile-hero">
@@ -132,12 +150,26 @@ export function ProfileSettingsSection({
       {authUser ? (
         <div className="settings-row">
           <span>Managed usage</span>
-          <div className="settings-control-stack">
-            <span className="settings-account-copy">
-              ${authUser.spentInWindowUsd ?? "0.000000"} used of $
-              {authUser.usageLimitUsd ?? "20.000000"} in the rolling{" "}
-              {authUser.usageWindowHours ?? 24}-hour window; $
-              {authUser.remainingUsd ?? "20.000000"} currently available.
+          <div className="settings-usage">
+            <div className="settings-usage-summary">
+              <span>{usdFormatter.format(spentUsd)} used</span>
+              <span>{usdFormatter.format(usageLimitUsd)} limit</span>
+            </div>
+            <div
+              className="settings-usage-track"
+              role="progressbar"
+              aria-label="Managed usage"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(usagePercent)}
+            >
+              <span
+                className="settings-usage-fill"
+                style={{ width: `${usagePercent}%` }}
+              />
+            </div>
+            <span className="settings-usage-reset">
+              Resets every {authUser.usageWindowHours ?? 24} hours
             </span>
           </div>
         </div>

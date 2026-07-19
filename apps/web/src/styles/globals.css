@@ -1151,6 +1151,46 @@ button {
   gap: 3px;
 }
 
+.settings-usage {
+  display: grid;
+  gap: 7px;
+}
+
+.settings-usage-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-row .settings-usage-summary span {
+  color: #52525b;
+  font-size: 12px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-usage-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e4e4e7;
+}
+
+.settings-usage-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #18181b;
+  transition: width 180ms ease;
+}
+
+.settings-row .settings-usage-reset {
+  color: #8e8e8e;
+  font-size: 10.5px;
+  font-weight: 450;
+}
+
 .settings-memory-list {
   gap: 8px;
 }
@@ -2850,6 +2890,26 @@ button {
 
 .app-shell[data-theme="night"] .settings-row .settings-hint,
 .settings-overlay[data-theme="night"] .settings-row .settings-hint {
+  color: #a1a1aa;
+}
+
+.app-shell[data-theme="night"] .settings-row .settings-usage-summary span,
+.settings-overlay[data-theme="night"] .settings-row .settings-usage-summary span {
+  color: #d4d4d8;
+}
+
+.app-shell[data-theme="night"] .settings-usage-track,
+.settings-overlay[data-theme="night"] .settings-usage-track {
+  background: #52525b;
+}
+
+.app-shell[data-theme="night"] .settings-usage-fill,
+.settings-overlay[data-theme="night"] .settings-usage-fill {
+  background: #f4f4f5;
+}
+
+.app-shell[data-theme="night"] .settings-row .settings-usage-reset,
+.settings-overlay[data-theme="night"] .settings-row .settings-usage-reset {
   color: #a1a1aa;
 }
 
