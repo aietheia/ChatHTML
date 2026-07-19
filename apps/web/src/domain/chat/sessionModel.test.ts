@@ -127,6 +127,26 @@ describe("sessionModel", () => {
     assert.equal(message.snapshot, undefined);
   });
 
+  it("moves a standalone HTML fallback out of assistant text on load", () => {
+    const rawStream =
+      "```html\n<!doctype html><html><body><h1>Recovered</h1></body></html>\n```";
+    const message = normalizeStoredMessage(
+      {
+        id: "assistant-html-fallback",
+        role: "assistant",
+        content: rawStream,
+        rawStream,
+        status: "complete",
+        generationOutcome: "complete"
+      },
+      { rebuildSnapshots: false }
+    );
+
+    assert.equal(message?.content, "");
+    assert.equal(message?.hasStreamUi, true);
+    assert.equal(message?.streamUiComplete, true);
+  });
+
   it("preserves resumable stored assistant streams", () => {
     const message = normalizeStoredMessage({
       id: "a1",

@@ -36,6 +36,7 @@ describe("extractStreamUiParts", () => {
     assert.equal(parts.hasChat, true);
     assert.equal(parts.hasStreamUi, true);
     assert.equal(parts.streamUiComplete, true);
+    assert.equal(parts.recoveredStandaloneHtml, false);
     assert.equal(parts.streamui, "<p>Hi</p>");
   });
 
@@ -52,5 +53,39 @@ describe("extractStreamUiParts", () => {
 
     assert.equal(parts.hasStreamUi, false);
     assert.equal(parts.fallbackText, "Plain answer");
+  });
+
+  it("recovers a standalone HTML document emitted without protocol tags", () => {
+    const raw =
+      "```html\n<!doctype html><html><body><h1>Recovered</h1></body></html>\n```";
+    const parts = extractStreamUiParts(raw);
+
+    assert.equal(parts.hasStreamUi, true);
+    assert.equal(parts.streamUiComplete, true);
+    assert.equal(parts.recoveredStandaloneHtml, true);
+    assert.match(parts.streamui, /<h1>Recovered<\/h1>/);
+    assert.equal(parts.fallbackText, "");
+  });
+
+  it("keeps chat copy while recovering HTML emitted beside the protocol", () => {
+    const parts = extractStreamUiParts(
+      "<sessiontitle>Demo</sessiontitle><chat>Summary</chat>" +
+        "<!doctype html><html><body><h1>Recovered</h1></body></html>"
+    );
+
+    assert.equal(parts.chat, "Summary");
+    assert.equal(parts.fallbackText, "Summary");
+    assert.equal(parts.hasStreamUi, true);
+    assert.equal(parts.recoveredStandaloneHtml, true);
+  });
+
+  it("does not reinterpret ordinary Markdown containing HTML as an artifact", () => {
+    const parts = extractStreamUiParts(
+      "Here is an example:\n```html\n<div>Example</div>\n```"
+    );
+
+    assert.equal(parts.hasStreamUi, false);
+    assert.equal(parts.recoveredStandaloneHtml, false);
+    assert.match(parts.fallbackText, /Here is an example/);
   });
 });

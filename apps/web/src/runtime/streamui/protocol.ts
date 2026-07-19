@@ -72,13 +72,61 @@ function removeProtocolTags(raw: string): string {
     .trim();
 }
 
+function extractStandaloneHtml(raw: string): {
+  content: string;
+  complete: boolean;
+} | null {
+  const withoutChatBlock = raw.replace(
+    /<chat\b[^>]*>[\s\S]*?<\/chat>/gi,
+    ""
+  );
+  let candidate = removeProtocolTags(withoutChatBlock).trim();
+  let closingFence = false;
+  const openingFence = /^```(?:html)?[\t ]*(?:\r?\n|$)/i.exec(candidate);
+
+  if (openingFence) {
+    candidate = candidate.slice(openingFence[0].length);
+    const closingFenceMatch = /(?:\r?\n)?```[\t ]*$/.exec(candidate);
+    if (closingFenceMatch?.index !== undefined) {
+      closingFence = true;
+      candidate = candidate.slice(0, closingFenceMatch.index);
+    }
+    candidate = candidate.trim();
+  }
+
+  if (
+    !/^(?:<!doctype\s+html\b[^>]*>\s*)?<(?:html|head|body)\b/i.test(
+      candidate
+    )
+  ) {
+    return null;
+  }
+
+  return {
+    content: candidate,
+    complete: closingFence || /<\/html\s*>\s*$/i.test(candidate)
+  };
+}
+
 export function extractStreamUiParts(raw: string): ExtractedStreamUiParts {
   const sessionTitle = extractBetween(raw, "sessiontitle");
   const chat = extractBetween(raw, "chat");
-  const streamui = extractStreamUi(raw);
-  const fallbackText = chat.hasOpen
+  const protocolStreamUi = extractStreamUi(raw);
+  const recoveredHtml = protocolStreamUi.hasOpen
+    ? null
+    : extractStandaloneHtml(raw);
+  const streamui = recoveredHtml
+    ? {
+        content: recoveredHtml.content,
+        hasOpen: true,
+        hasClose: recoveredHtml.complete
+      }
+    : protocolStreamUi;
+  const fallbackText = streamui.hasOpen
     ? chat.content.trim()
-    : removeProtocolTags(raw);
+    : chat.hasOpen
+      ? chat.content.trim()
+      : removeProtocolTags(raw);
 
   return {
     sessionTitle: sessionTitle.content.trim(),
@@ -89,6 +137,7 @@ export function extractStreamUiParts(raw: string): ExtractedStreamUiParts {
     hasChat: chat.hasOpen,
     hasStreamUi: streamui.hasOpen,
     streamUiComplete: streamui.hasClose,
+    recoveredStandaloneHtml: Boolean(recoveredHtml),
     fallbackText
   };
 }

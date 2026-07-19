@@ -109,19 +109,19 @@ export function normalizeStoredMessage(
 
   const rawStream =
     typeof input.rawStream === "string" ? input.rawStream : undefined;
-  const streamParts =
-    rawStream && options.rebuildSnapshots === false
-      ? extractStreamUiParts(rawStream)
-      : null;
+  const streamParts = rawStream ? extractStreamUiParts(rawStream) : null;
+  const storedContent = typeof input.content === "string" ? input.content : "";
   const normalized: ClientMessage = {
     id: input.id,
     role: input.role,
     content:
       input.role === "user" && typeof input.content === "string"
         ? stripLegacyArtifactActionPrefix(input.content)
-        : typeof input.content === "string"
-          ? input.content
-          : "",
+        : streamParts?.recoveredStandaloneHtml &&
+            rawStream &&
+            storedContent.trim() === rawStream.trim()
+          ? streamParts.chat
+          : storedContent,
     attachments: Array.isArray(input.attachments) ? input.attachments : undefined,
     fileIds: normalizeStringArray(input.fileIds),
     reasoning: typeof input.reasoning === "string" ? input.reasoning : undefined,

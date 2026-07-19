@@ -125,6 +125,13 @@ export function AssistantMessage({
   onSelectBranch,
   onSelectArtifactEdit
 }: AssistantMessageProps) {
+  const parsedRawStream = useMemo(
+    () => (rawStream ? extractStreamUiParts(rawStream) : undefined),
+    [rawStream]
+  );
+  const effectiveHasStreamUi = Boolean(
+    hasStreamUi || parsedRawStream?.hasStreamUi
+  );
   const resolvedSnapshot = useMemo(() => {
     const withRuntimeErrors = (
       candidate: RenderSnapshot | undefined
@@ -152,11 +159,11 @@ export function AssistantMessage({
       };
     };
 
-    if (!hasStreamUi || !rawStream) {
+    if (!effectiveHasStreamUi || !rawStream) {
       return withRuntimeErrors(snapshot);
     }
 
-    const parts = extractStreamUiParts(rawStream);
+    const parts = parsedRawStream ?? extractStreamUiParts(rawStream);
     if (!parts.hasStreamUi || !parts.streamui.trim()) {
       return snapshot;
     }
@@ -175,16 +182,27 @@ export function AssistantMessage({
     return withRuntimeErrors(renderer.getSnapshot());
   }, [
     generationOutcome,
-    hasStreamUi,
+    effectiveHasStreamUi,
+    parsedRawStream,
     rawStream,
     runtimeErrors,
     snapshot,
     status,
     themeMode
   ]);
-  const visibleContent = stripInternalArtifactContextText(content);
+  const rawArtifactWasStoredAsText = Boolean(
+    effectiveHasStreamUi &&
+      rawStream &&
+      content.trim() === rawStream.trim()
+  );
+  const visibleContent = stripInternalArtifactContextText(
+    parsedRawStream?.recoveredStandaloneHtml ||
+      (effectiveHasStreamUi && (!hasStreamUi || rawArtifactWasStoredAsText))
+      ? parsedRawStream?.chat ?? ""
+      : content
+  );
   const hasVisibleArtifact = Boolean(
-    hasStreamUi &&
+    effectiveHasStreamUi &&
       resolvedSnapshot &&
       (!rawStream || hasLikelyVisibleStreamUiContent(rawStream))
   );
@@ -198,9 +216,7 @@ export function AssistantMessage({
   const hasDisplayError = Boolean(
     error || runtimeErrors?.length || resolvedSnapshot?.errors.length
   );
-  const rawStreamUiComplete = rawStream
-    ? extractStreamUiParts(rawStream).streamUiComplete
-    : false;
+  const rawStreamUiComplete = parsedRawStream?.streamUiComplete ?? false;
   const artifactInteractionsReady =
     shouldCompleteArtifactRender({
       status,
@@ -372,15 +388,13 @@ export function AssistantMessage({
           error={error}
           placeholder={placeholder}
         />
-        {hasStreamUi && resolvedSnapshot ? (
+        {effectiveHasStreamUi && resolvedSnapshot ? (
           <AssistantPreviewBubble
             id={id}
             snapshot={resolvedSnapshot}
             themeMode={themeMode}
             actions={turnActions}
-            editingEnabled={artifactEditingEnabled}
             selectionModeActive={isArtifactSelectionModeActive}
-            selectionDisabled={!artifactEditingEnabled || selectionDisabled}
             selections={artifactSelections}
             busySelections={artifactBusySelections}
             onRuntimeError={onRuntimeError}

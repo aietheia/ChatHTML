@@ -184,11 +184,13 @@ describe("sandboxDocument", () => {
     assert.doesNotMatch(document, /rgba\(37, 99, 235/);
   });
 
-  it("forwards wheel input when the preview cannot scroll further", () => {
+  it("consumes wheel input and forwards only the unconsumed delta", () => {
     const document = buildIframeDocument("<div>Scrollable content</div>");
 
-    assert.match(document, /canPreviewConsumeWheel/);
-    assert.match(document, /canScrollInDirection/);
+    assert.match(document, /consumePreviewWheel/);
+    assert.match(document, /scrollableDistance/);
+    assert.match(document, /event\.preventDefault\(\)/);
+    assert.match(document, /passive: false/);
     assert.match(document, /post\("wheel", "wheel"/);
     assert.match(document, /event\.ctrlKey/);
   });

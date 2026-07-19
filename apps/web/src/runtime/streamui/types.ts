@@ -79,5 +79,6 @@ export type ExtractedStreamUiParts = {
   hasChat: boolean;
   hasStreamUi: boolean;
   streamUiComplete: boolean;
+  recoveredStandaloneHtml: boolean;
   fallbackText: string;
 };

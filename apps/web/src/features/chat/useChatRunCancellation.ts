@@ -191,7 +191,17 @@ export function useChatRunCancellation({
 
     targets.forEach((target) => cancelledRunIdsRef.current.add(target.runId));
     try {
-      await Promise.all(targets.map((target) => controller.cancel(target)));
+      const cancellations = targets.map((target) => controller.cancel(target));
+
+      // Stop the visible stream as soon as the user asks. The authoritative
+      // cancellation request still runs to settle the server-owned outcome,
+      // but it must not keep the composer in a running state while that
+      // round-trip (or a run-acceptance race) completes.
+      targets.forEach((target) => {
+        runConnectionsRef.current.get(target.runId)?.abort();
+      });
+
+      await Promise.all(cancellations);
     } finally {
       targets.forEach((target) =>
         cancelledRunIdsRef.current.delete(target.runId)

@@ -2098,7 +2098,13 @@ button {
 }
 
 .bug-report-spinner {
-  animation: spin 900ms linear infinite;
+  animation: bug-report-spin 900ms linear infinite;
+}
+
+@keyframes bug-report-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes bug-report-thanks-pop {
@@ -3162,32 +3168,6 @@ button {
 }
 
 .app-shell[data-theme="night"] .artifact-select-action.is-active:hover:not(:disabled) {
-  color: #ffffff;
-  background: rgba(37, 99, 235, 0.38);
-}
-
-.app-shell[data-theme="night"] .artifact-floating-edit-action {
-  color: #d4d4d8;
-  background: rgba(39, 39, 42, 0.88);
-  box-shadow:
-    0 14px 34px rgba(0, 0, 0, 0.32),
-    0 0 0 1px rgba(255, 255, 255, 0.1);
-}
-
-.app-shell[data-theme="night"] .artifact-floating-edit-action:hover:not(:disabled) {
-  color: #ffffff;
-  background: #454545;
-}
-
-.app-shell[data-theme="night"] .artifact-floating-edit-action.is-active {
-  color: #bfdbfe;
-  background: rgba(37, 99, 235, 0.28);
-  box-shadow:
-    0 14px 34px rgba(0, 0, 0, 0.32),
-    0 0 0 1px rgba(147, 197, 253, 0.18);
-}
-
-.app-shell[data-theme="night"] .artifact-floating-edit-action.is-active:hover:not(:disabled) {
   color: #ffffff;
   background: rgba(37, 99, 235, 0.38);
 }
@@ -4455,7 +4435,7 @@ button {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -18px;
+  left: -36px;
   width: 32px;
   pointer-events: none;
   background: linear-gradient(
@@ -4467,7 +4447,6 @@ button {
   );
   content: "";
   filter: blur(1px);
-  transform: translateX(-110%);
   animation: reasoning-sheen 1.8s ease-in-out infinite;
 }
 
@@ -4493,12 +4472,12 @@ button {
 
 @keyframes reasoning-sheen {
   0% {
-    transform: translateX(-110%);
+    left: -36px;
   }
 
   58%,
   100% {
-    transform: translateX(220%);
+    left: calc(100% + 4px);
   }
 }
 
@@ -4699,10 +4678,6 @@ button {
   align-items: stretch;
 }
 
-.assistant-artifact-block.has-floating-edit-action {
-  width: min(900px, calc(100% - 48px));
-}
-
 .assistant-canvas {
   display: grid;
   position: relative;
@@ -4721,60 +4696,6 @@ button {
 
 .assistant-preview-shell > .preview-frame {
   grid-area: 1 / 1;
-}
-
-.artifact-floating-edit-action {
-  position: fixed;
-  z-index: 6;
-  width: 34px;
-  min-width: 0;
-  height: 34px;
-  flex-basis: 34px;
-  margin: 0;
-  padding: 0;
-  border-radius: 999px;
-  color: #52525b;
-  background: rgba(255, 255, 255, 0.9);
-  opacity: 0;
-  pointer-events: none;
-  box-shadow:
-    0 12px 30px rgba(24, 24, 27, 0.16),
-    0 0 0 1px rgba(24, 24, 27, 0.08);
-  transform: translateY(-4px) scale(0.96);
-  backdrop-filter: blur(12px);
-  transition:
-    opacity 160ms ease,
-    transform 160ms ease,
-    background 150ms ease,
-    color 150ms ease,
-    box-shadow 150ms ease;
-}
-
-.artifact-floating-edit-action.is-visible {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(0) scale(1);
-}
-
-.artifact-floating-edit-action:hover:not(:disabled) {
-  color: #18181b;
-  background: #ffffff;
-  box-shadow:
-    0 14px 34px rgba(24, 24, 27, 0.18),
-    0 0 0 1px rgba(24, 24, 27, 0.12);
-}
-
-.artifact-floating-edit-action.is-active {
-  color: #1d4ed8;
-  background: #eff6ff;
-  box-shadow:
-    0 14px 34px rgba(24, 24, 27, 0.18),
-    0 0 0 1px rgba(37, 99, 235, 0.2);
-}
-
-.artifact-floating-edit-action.is-active:hover:not(:disabled) {
-  color: #1e40af;
-  background: #dbeafe;
 }
 
 .assistant-artifact-actions-slot {
@@ -6361,10 +6282,6 @@ button {
     padding-top: 58px;
   }
 
-  .assistant-artifact-block.has-floating-edit-action {
-    width: min(900px, 100%);
-  }
-
   .thread-root.is-thinking-activity-open .message-list.has-messages {
     padding-right: 16px;
   }
@@ -6697,15 +6614,9 @@ button {
     min-height: 36px;
   }
 
-  .artifact-floating-edit-action {
-    width: 40px;
-    height: 40px;
-    flex-basis: 40px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .artifact-floating-edit-action,
   .assistant-artifact-actions,
   .assistant-artifact-side-actions {
     transition: none;

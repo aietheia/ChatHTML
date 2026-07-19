@@ -23,49 +23,84 @@ export function buildCoreSource(
           }, "*");
         } catch {}
       };
-      const canScrollInDirection = (element, deltaY, requireScrollableStyle) => {
+      const scrollableDistance = (element, deltaY, requireScrollableStyle) => {
         if (!(element instanceof Element)) {
-          return false;
+          return 0;
         }
 
         if (requireScrollableStyle) {
           const overflowY = getComputedStyle(element).overflowY;
           if (!/^(auto|scroll|overlay)$/.test(overflowY)) {
-            return false;
+            return 0;
           }
         }
 
         const maxScrollTop = element.scrollHeight - element.clientHeight;
         if (maxScrollTop <= 1) {
-          return false;
+          return 0;
         }
 
         return deltaY < 0
-          ? element.scrollTop > 1
-          : element.scrollTop < maxScrollTop - 1;
+          ? Math.max(0, element.scrollTop)
+          : Math.max(0, maxScrollTop - element.scrollTop);
       };
-      const canPreviewConsumeWheel = (target, deltaY) => {
+      const consumePreviewWheel = (target, deltaY) => {
+        let remaining = deltaY;
         let element = target instanceof Element ? target : target?.parentElement;
         while (element && element !== document.documentElement) {
-          if (canScrollInDirection(element, deltaY, true)) {
-            return true;
+          const available = scrollableDistance(element, remaining, true);
+          if (available > 0) {
+            const consumed = Math.sign(remaining) * Math.min(
+              Math.abs(remaining),
+              available
+            );
+            element.scrollTop += consumed;
+            remaining -= consumed;
+            if (Math.abs(remaining) < 0.01) {
+              return 0;
+            }
           }
           element = element.parentElement;
         }
 
-        return canScrollInDirection(document.scrollingElement, deltaY, false);
+        const scrollingElement = document.scrollingElement;
+        const available = scrollableDistance(scrollingElement, remaining, false);
+        if (available > 0 && scrollingElement) {
+          const consumed = Math.sign(remaining) * Math.min(
+            Math.abs(remaining),
+            available
+          );
+          scrollingElement.scrollTop += consumed;
+          remaining -= consumed;
+        }
+        return Math.abs(remaining) < 0.01 ? 0 : remaining;
       };
       document.addEventListener("wheel", (event) => {
-        const deltaY = Number(event.deltaY) || 0;
-        if (!deltaY || event.ctrlKey || canPreviewConsumeWheel(event.target, deltaY)) {
+        const rawDeltaY = Number(event.deltaY) || 0;
+        if (!rawDeltaY || event.ctrlKey) {
+          return;
+        }
+
+        const deltaScale = event.deltaMode === 1
+          ? 16
+          : event.deltaMode === 2
+            ? window.innerHeight
+            : 1;
+        const remainingDeltaY = consumePreviewWheel(
+          event.target,
+          rawDeltaY * deltaScale
+        );
+        event.preventDefault();
+
+        if (!remainingDeltaY) {
           return;
         }
 
         post("wheel", "wheel", {
-          deltaY,
-          deltaMode: event.deltaMode
+          deltaY: remainingDeltaY,
+          deltaMode: 0
         });
-      }, { passive: true });
+      }, { passive: false });
       const MATHJAX_SCRIPT_SRC = "${MATHJAX_SCRIPT_SRC}";
       let runtimeDocumentLoaded = document.readyState === "complete";
       window.addEventListener("load", () => {
