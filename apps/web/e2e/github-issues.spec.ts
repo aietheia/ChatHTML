@@ -658,6 +658,29 @@ test("streaming growth keeps the composer pinned and follows the artifact bottom
       timeout: 10_000
     })
     .toBeGreaterThan(700);
+  const artifact = page.frameLocator(
+    'iframe[title="ChatHTML artifact preview"]'
+  );
+  const finalStreamRow = artifact.getByText("Stream row 11", { exact: true });
+  await expect(finalStreamRow).toBeVisible();
+  const finalMeasuredFrameHeight = await artifact
+    .locator("#streaming-content")
+    .evaluate((element) => {
+      const body = element.ownerDocument.body;
+      const bodyTop = body.getBoundingClientRect().top;
+      const contentBottom = element.getBoundingClientRect().bottom - bodyTop;
+      const bodyPaddingBottom =
+        Number.parseFloat(getComputedStyle(body).paddingBottom) || 0;
+
+      // Keep this aligned with HEIGHT_SAFETY_PADDING in measurementSource.ts.
+      return Math.ceil(contentBottom + bodyPaddingBottom + 28);
+    });
+  await expect
+    .poll(
+      () => iframe.evaluate((element) => element.getBoundingClientRect().height),
+      { timeout: 10_000 }
+    )
+    .toBeGreaterThanOrEqual(finalMeasuredFrameHeight);
   const viewport = page.locator(".message-list");
   await expect
     .poll(
