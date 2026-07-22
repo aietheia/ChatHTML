@@ -32,7 +32,6 @@ import {
 } from "./chatHtmlService.js";
 import {
   deleteAccountSessionData,
-  handleAdminGetAllSessions,
   handleCreateSessionFile,
   handleDeleteSessionFile,
   handleGetFileContent,
@@ -95,7 +94,7 @@ function getDeployToken(req: Request): string {
   return req.get("x-chathtml-deploy-token")?.trim() ?? "";
 }
 
-function authorizeDeployAdmin(req: Request, res: Response): boolean {
+function authorizeDeployOperation(req: Request, res: Response): boolean {
   const expected = process.env.CHATHTML_DEPLOY_TOKEN?.trim();
   if (!expected) {
     res.status(404).json({ error: "Deploy drain endpoint is not configured." });
@@ -144,8 +143,8 @@ app.get("/api/health", async (_req, res) => {
   });
 });
 
-app.post("/api/admin/drain", (req, res) => {
-  if (!authorizeDeployAdmin(req, res)) {
+app.post("/api/ops/drain", (req, res) => {
+  if (!authorizeDeployOperation(req, res)) {
     return;
   }
   res.json({
@@ -154,8 +153,8 @@ app.post("/api/admin/drain", (req, res) => {
   });
 });
 
-app.delete("/api/admin/drain", (req, res) => {
-  if (!authorizeDeployAdmin(req, res)) {
+app.delete("/api/ops/drain", (req, res) => {
+  if (!authorizeDeployOperation(req, res)) {
     return;
   }
   res.json({
@@ -164,8 +163,8 @@ app.delete("/api/admin/drain", (req, res) => {
   });
 });
 
-app.get("/api/admin/deploy-ready", (req, res) => {
-  if (!authorizeDeployAdmin(req, res)) {
+app.get("/api/ops/deploy-ready", (req, res) => {
+  if (!authorizeDeployOperation(req, res)) {
     return;
   }
   const idleMs = parseDurationMs(
@@ -248,7 +247,6 @@ app.post("/api/retrieve", handleRetrievalRequest);
 app.get("/api/export-resource", handleExportResourceRequest);
 app.get("/api/media-image", handleMediaImageRequest);
 app.get("/api/sessions", handleGetSessions);
-app.get("/api/admin/sessions", handleAdminGetAllSessions);
 app.get("/api/account/export", handleExportAccountData);
 app.delete("/api/account", async (req, res) => {
   try {

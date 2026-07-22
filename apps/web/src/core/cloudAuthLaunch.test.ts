@@ -72,7 +72,7 @@ describe("cloud authentication launch", () => {
             "chathtml://oauth/callback?code=one-time-code&state=oauth-state"
         });
         return Response.json({
-          user: { id: "user-1", email: "app@example.com", role: "user" },
+          user: { id: "user-1", email: "app@example.com" },
           auth: { available: true, requiresInvite: false, firstUser: false }
         });
       }

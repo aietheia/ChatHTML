@@ -13,8 +13,7 @@ import { AUTH_UNAVAILABLE_SUMMARY } from "./cloudAuthModel";
 const signedIn: AuthSummary = {
   user: {
     id: "user-1",
-    email: "user@example.com",
-    role: "user"
+    email: "user@example.com"
   },
   auth: {
     available: true,

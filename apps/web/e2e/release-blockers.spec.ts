@@ -1101,7 +1101,7 @@ test("signed-in users can keep or merge browser sessions with their files", asyn
     if (path === "/api/auth/me") {
       await fulfillJson(route, {
         user: authenticated
-          ? { id: "e2e-user", email: "e2e@example.com", role: "user" }
+          ? { id: "e2e-user", email: "e2e@example.com" }
           : null,
         auth: { available: true, requiresInvite: false, firstUser: false }
       });

@@ -85,8 +85,6 @@ function authSummary(payload: Record<string, unknown>): AuthSummary {
     typeof user !== "object" ||
     typeof (user as { id?: unknown }).id !== "string" ||
     typeof (user as { email?: unknown }).email !== "string" ||
-    ((user as { role?: unknown }).role !== "admin" &&
-      (user as { role?: unknown }).role !== "user") ||
     !auth ||
     typeof auth !== "object" ||
     typeof (auth as { available?: unknown }).available !== "boolean" ||

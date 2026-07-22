@@ -49,10 +49,6 @@ export type SessionStateSnapshot = {
   version: number;
 };
 
-export type SessionStateEntry = SessionStateSnapshot & {
-  stateKey: string;
-};
-
 type PostgresTransactionContext = {
   client: PoolClient;
   stateKey: string;
@@ -470,53 +466,29 @@ export async function writeSessionState(
   await writeSqliteState(state, stateKey);
 }
 
-export async function readAllSessionStateEntries(): Promise<
-  SessionStateEntry[]
-> {
+export async function readAllSessionStates(): Promise<StoredSessionState[]> {
   if (getSessionRepositoryBackend() === "postgres") {
     const pool = await getPostgresPool();
-    const result = await pool.query(
-      "SELECT state_key, value, updated_at FROM chathtml_state"
-    );
-    return result.rows.map((row) => ({
-      stateKey: String(row.state_key),
-      state: normalizedPostgresValue(row.value),
-      version: Number(row.updated_at)
-    }));
+    const result = await pool.query("SELECT value FROM chathtml_state");
+    return result.rows.map((row) => normalizedPostgresValue(row.value));
   }
 
   const db = await getSqliteDatabase();
-  const rows = (await db.all(
-    "SELECT key, value, updated_at FROM streamui_state"
-  )) as Array<{
-    key?: unknown;
+  const rows = (await db.all("SELECT value FROM streamui_state")) as Array<{
     value?: unknown;
-    updated_at?: unknown;
   }>;
-  const entries: SessionStateEntry[] = [];
+  const states: StoredSessionState[] = [];
   for (const row of rows) {
-    if (
-      typeof row.key !== "string" ||
-      typeof row.value !== "string" ||
-      !Number.isFinite(Number(row.updated_at))
-    ) {
+    if (typeof row.value !== "string") {
       continue;
     }
     try {
-      entries.push({
-        stateKey: row.key,
-        state: normalizeStoredSessionState(JSON.parse(row.value)),
-        version: Number(row.updated_at)
-      });
+      states.push(normalizeStoredSessionState(JSON.parse(row.value)));
     } catch (error) {
       console.warn("Could not parse ChatHTML session row.", error);
     }
   }
-  return entries;
-}
-
-export async function readAllSessionStates(): Promise<StoredSessionState[]> {
-  return (await readAllSessionStateEntries()).map((entry) => entry.state);
+  return states;
 }
 
 export async function findStoredFileCapability(

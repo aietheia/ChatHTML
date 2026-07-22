@@ -3,7 +3,6 @@ import { describe, it } from "node:test";
 import {
   createSessionPageExitTransport,
   deleteSessionFile,
-  requestAdminSessions,
   requestSessionIndex,
   requestSessions,
   saveSerializedSessionState,
@@ -34,16 +33,15 @@ describe("session API", () => {
     });
   });
 
-  it("requests the session index, account state, and admin archive", async () => {
+  it("requests the session index and account state", async () => {
     const { calls, fetchImpl } = mockFetch(Response.json({}));
 
     await requestSessionIndex("client-1", fetchImpl);
     await requestSessions("client-1", fetchImpl);
-    await requestAdminSessions("client-1", fetchImpl);
 
     assert.deepEqual(
       calls.map((call) => call.input),
-      ["/api/sessions/index", "/api/sessions", "/api/admin/sessions"]
+      ["/api/sessions/index", "/api/sessions"]
     );
     assert.deepEqual(calls[0].init?.headers, {
       "X-ChatHTML-Client-Id": "client-1"

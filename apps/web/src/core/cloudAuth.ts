@@ -3,7 +3,6 @@ import { apiUrl } from "../api/appUrl";
 export type AuthUser = {
   id: string;
   email: string;
-  role: "admin" | "user";
   balanceUsd?: string;
   balanceMicros?: number;
   spentInWindowUsd?: string;

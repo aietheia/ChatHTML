@@ -9,8 +9,7 @@ import {
 
 const user: AuthUser = {
   id: "user-1",
-  email: "user@example.com",
-  role: "user"
+  email: "user@example.com"
 };
 
 const summary: AuthSummary = {

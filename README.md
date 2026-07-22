@@ -297,7 +297,6 @@ useful settings are:
 | `STREAMUI_SESSION_DB` | `./sessions/state.sqlite` | SQLite state file |
 | `CHATHTML_DATABASE_URL` | none | PostgreSQL connection string for production |
 | `CHATHTML_AUTH_REQUIRED` | false outside production | Require a hosted account |
-| `CHATHTML_ADMIN_USER_IDS` | none | Explicit account-ID allowlist for admin-only APIs |
 
 With `STREAMUI_SEARCH_PROVIDER=auto`, configured API providers are preferred
 and DuckDuckGo can be used as a fallback. Several visual and museum sources work

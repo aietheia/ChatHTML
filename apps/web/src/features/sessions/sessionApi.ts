@@ -46,16 +46,6 @@ export function requestSessions(
   });
 }
 
-export function requestAdminSessions(
-  clientId: string,
-  fetchImpl: FetchLike = fetch
-): Promise<Response> {
-  return fetchImpl(apiUrl("/admin/sessions"), {
-    headers: sessionRequestHeaders(clientId),
-    cache: "no-cache"
-  });
-}
-
 export async function uploadSessionFile(
   sessionId: string,
   input: SessionFileUploadInput,

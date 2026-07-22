@@ -19,7 +19,7 @@ function readDuration(name, fallback) {
 
 function deriveDrainUrl(input) {
   const url = new URL(input);
-  url.pathname = url.pathname.replace(/\/api\/health\/?$/, "/api/admin/drain");
+  url.pathname = url.pathname.replace(/\/api\/health\/?$/, "/api/ops/drain");
   url.search = "";
   return url.toString();
 }

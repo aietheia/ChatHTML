@@ -15,7 +15,6 @@ const MAX_SERVICE_RESPONSE_BYTES = 256 * 1024;
 export type ServiceUser = {
   id: string;
   email: string;
-  role: "admin" | "user";
   balanceUsd?: string;
   balanceMicros?: number;
   spentInWindowUsd?: string;
@@ -67,7 +66,6 @@ export type ChatHtmlServiceGatewayOptions = {
   nodeEnv?: string;
   publicOrigin?: string;
   appRedirectUri?: string;
-  adminUserIds?: readonly string[];
 };
 
 class ServiceHttpError extends Error {
@@ -256,26 +254,12 @@ async function requireSuccessfulJson(
   return payload;
 }
 
-function restrictAdminRole(
-  user: ServiceUser,
-  adminUserIds: ReadonlySet<string>
-): ServiceUser {
-  if (user.role !== "admin" || adminUserIds.has(user.id)) {
-    return user;
-  }
-  return { ...user, role: "user" };
-}
-
-function asAuthSession(
-  payload: unknown,
-  adminUserIds: ReadonlySet<string>
-): ServiceAuthSession {
+function asAuthSession(payload: unknown): ServiceAuthSession {
   const value = payload as Partial<ServiceAuthSession> | null;
   if (
     !value?.user ||
     typeof value.user.id !== "string" ||
     typeof value.user.email !== "string" ||
-    (value.user.role !== "admin" && value.user.role !== "user") ||
     typeof value.accessToken !== "string" ||
     !/^[A-Za-z0-9_-]{20,256}$/.test(value.accessToken) ||
     typeof value.expiresAt !== "number" ||
@@ -283,26 +267,19 @@ function asAuthSession(
   ) {
     throw new Error("ChatHTML Service returned an invalid authentication session.");
   }
-  return {
-    ...(value as ServiceAuthSession),
-    user: restrictAdminRole(value.user, adminUserIds)
-  };
+  return value as ServiceAuthSession;
 }
 
-function asUser(
-  payload: unknown,
-  adminUserIds: ReadonlySet<string>
-): ServiceUser {
+function asUser(payload: unknown): ServiceUser {
   const value = payload as { user?: ServiceUser } | null;
   if (
     !value?.user ||
     typeof value.user.id !== "string" ||
-    typeof value.user.email !== "string" ||
-    (value.user.role !== "admin" && value.user.role !== "user")
+    typeof value.user.email !== "string"
   ) {
     throw new Error("ChatHTML Service returned an invalid user.");
   }
-  return restrictAdminRole(value.user, adminUserIds);
+  return value.user;
 }
 
 function asAvailability(payload: unknown): AuthAvailability {
@@ -362,13 +339,6 @@ export function createChatHtmlServiceGateway(
       process.env.CHATHTML_APP_OAUTH_REDIRECT_URI ??
       DEFAULT_CHATHTML_APP_OAUTH_REDIRECT_URI
   );
-  const adminUserIds = new Set(
-    (options.adminUserIds ??
-      process.env.CHATHTML_ADMIN_USER_IDS?.split(",") ??
-      [])
-      .map((value) => value.trim())
-      .filter(Boolean)
-  );
   const serviceOrigin = new URL(baseUrl).origin;
   // Never positively cache token introspection. Password recovery, password
   // changes, logout, and account deletion revoke Service sessions; a positive
@@ -409,8 +379,7 @@ export function createChatHtmlServiceGateway(
       return null;
     }
     const user = asUser(
-      await requireSuccessfulJson(response, "Could not authenticate the request."),
-      adminUserIds
+      await requireSuccessfulJson(response, "Could not authenticate the request.")
     );
     return user;
   };
@@ -602,8 +571,7 @@ export function createChatHtmlServiceGateway(
         })
       });
       const session = asAuthSession(
-        await requireSuccessfulJson(response, "OAuth token exchange failed."),
-        adminUserIds
+        await requireSuccessfulJson(response, "OAuth token exchange failed.")
       );
       clearOAuthCookies();
       res.append(

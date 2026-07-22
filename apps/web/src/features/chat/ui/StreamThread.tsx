@@ -42,7 +42,6 @@ export type StreamThreadProps = {
   themeMode: ThemeMode;
   showRawStream: boolean;
   artifactEditingEnabled: boolean;
-  readOnly?: boolean;
   model: string;
   modelOptions: string[];
   reasoningEffort: ReasoningEffort;
@@ -98,7 +97,6 @@ export function StreamThread({
   themeMode,
   showRawStream,
   artifactEditingEnabled,
-  readOnly = false,
   model,
   modelOptions,
   reasoningEffort,
@@ -207,7 +205,7 @@ export function StreamThread({
     activeSessionId,
     messageById,
     visibleMessageIds,
-    artifactEditingEnabled: artifactEditingEnabled && !readOnly,
+    artifactEditingEnabled,
     clearVersion: artifactSelectionClearVersion,
     clearMessageId: artifactSelectionClearMessageId,
     onChange: onArtifactSelectionsChange
@@ -417,8 +415,7 @@ export function StreamThread({
                   runtimeErrors={clientMessage.runtimeErrors}
                   themeMode={themeMode}
                   showRawStream={showRawStream}
-                  artifactEditingEnabled={artifactEditingEnabled && !readOnly}
-                  readOnly={readOnly}
+                  artifactEditingEnabled={artifactEditingEnabled}
                   status={clientMessage.status}
                   generationOutcome={clientMessage.generationOutcome}
                   error={clientMessage.error}
@@ -438,9 +435,7 @@ export function StreamThread({
                   artifactVersionInfo={artifactVersionInfo}
                   activeReasoningMessageId={activeReasoningMessageId ?? undefined}
                   onRuntimeError={onRuntimeError}
-                  onArtifactAction={
-                    readOnly ? () => undefined : onArtifactAction
-                  }
+                  onArtifactAction={onArtifactAction}
                   onArtifactSelection={artifactSelection.select}
                   onArtifactSelectionModeChange={
                     artifactSelection.toggleMode
@@ -465,16 +460,12 @@ export function StreamThread({
                   const timeline = artifactEditTimelineByUserId.get(
                     clientMessage.id
                   );
-                  return timeline && (isThreadRunning || readOnly)
+                  return timeline && isThreadRunning
                     ? { ...timeline, disabled: true }
                     : timeline;
                 })()}
-                onEdit={
-                  isThreadRunning || readOnly ? undefined : onEditUserMessage
-                }
-                onEditArtifactEditPrompt={
-                  readOnly ? undefined : onEditArtifactEditPrompt
-                }
+                onEdit={isThreadRunning ? undefined : onEditUserMessage}
+                onEditArtifactEditPrompt={onEditArtifactEditPrompt}
               >
                 {clientMessage.content}
               </ChatMessage>
@@ -485,30 +476,24 @@ export function StreamThread({
           ref={setComposerFooterElement}
           className={`composer-footer ${isNewChat ? "is-new" : "has-messages"}`}
         >
-          {readOnly ? (
-            <div className="admin-session-read-only" role="status">
-              Read-only admin session view
-            </div>
-          ) : (
-            <ChatInput
-              model={model}
-              modelOptions={modelOptions}
-              reasoningEffort={reasoningEffort}
-              reasoningSupported={reasoningSupported}
-              submissionError={composerSubmissionError}
-              attachmentSafetyBlocked={composerAttachmentSafetyBlocked}
-              attachmentSafetyError={composerAttachmentSafetyError}
-              uiComplexity={uiComplexity}
-              artifactSelections={artifactSelection.selections}
-              onRemoveArtifactSelection={artifactSelection.remove}
-              onClearArtifactSelections={artifactSelection.clear}
-              onModelChange={onModelChange}
-              onReasoningEffortChange={onReasoningEffortChange}
-              onDismissSubmissionError={onDismissComposerSubmissionError}
-              onRetryAttachmentCleanup={onRetryComposerAttachmentCleanup}
-              onUiComplexityChange={onUiComplexityChange}
-            />
-          )}
+          <ChatInput
+            model={model}
+            modelOptions={modelOptions}
+            reasoningEffort={reasoningEffort}
+            reasoningSupported={reasoningSupported}
+            submissionError={composerSubmissionError}
+            attachmentSafetyBlocked={composerAttachmentSafetyBlocked}
+            attachmentSafetyError={composerAttachmentSafetyError}
+            uiComplexity={uiComplexity}
+            artifactSelections={artifactSelection.selections}
+            onRemoveArtifactSelection={artifactSelection.remove}
+            onClearArtifactSelections={artifactSelection.clear}
+            onModelChange={onModelChange}
+            onReasoningEffortChange={onReasoningEffortChange}
+            onDismissSubmissionError={onDismissComposerSubmissionError}
+            onRetryAttachmentCleanup={onRetryComposerAttachmentCleanup}
+            onUiComplexityChange={onUiComplexityChange}
+          />
         </ThreadPrimitive.ViewportFooter>
       </ThreadPrimitive.Viewport>
       {showReasoningActivity && activeReasoningMessage ? (
