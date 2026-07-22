@@ -1183,6 +1183,15 @@ test("signed-in users can keep or merge browser sessions with their files", asyn
   });
 
   await page.goto("/");
+  const popArtDialog = page.getByRole("dialog", {
+    name: "Try Pop Art Style?"
+  });
+  await expect(popArtDialog).toBeVisible();
+  await popArtDialog
+    .getByRole("button", { name: "Try Pop Art Style" })
+    .click();
+  await expect(popArtDialog).toBeHidden();
+
   const mergeDialog = page.getByRole("dialog", {
     name: "Save local sessions to your account?"
   });
@@ -1202,6 +1211,11 @@ test("signed-in users can keep or merge browser sessions with their files", asyn
   ).not.toBeNull();
 
   await page.reload();
+  await expect(popArtDialog).toBeVisible();
+  await popArtDialog
+    .getByRole("button", { name: "Try Pop Art Style" })
+    .click();
+  await expect(popArtDialog).toBeHidden();
   await expect(mergeDialog).toBeVisible();
   await mergeDialog.getByRole("button", { name: "Merge 1 local session" }).click();
   await expect(mergeDialog).toBeHidden();
@@ -1225,6 +1239,9 @@ test("signed-in users can keep or merge browser sessions with their files", asyn
   await page.getByRole("button", { name: "Open personal settings" }).click();
   const settings = page.getByRole("dialog", { name: "Personal" });
   await expect(settings).toBeVisible();
+  await expect(settings.getByLabel("User Preference Prompt")).toHaveValue(
+    "- In Pop Art style"
+  );
   await settings.getByRole("button", { name: "Sign out" }).click();
   await expect(settings).toBeHidden();
   await expect(
