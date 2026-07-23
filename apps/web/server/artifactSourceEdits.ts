@@ -18,6 +18,12 @@ export type RecoveredArtifactSourceEdits = {
   recovery: "none" | "raw_streamui";
 };
 
+export type AppliedArtifactSourceEdits = {
+  rawStream: string;
+  applied: AppliedArtifactSourceEdit[];
+  rebasedFromOriginal: boolean;
+};
+
 const MAX_SOURCE_EDITS = 24;
 const MAX_NOTE_LENGTH = 240;
 const STREAMUI_BLOCK_PATTERN = /<streamui\b[^>]*>[\s\S]*?<\/streamui>/i;
@@ -204,10 +210,10 @@ function assertProtocolStructurePreserved(source: string, current: string): void
   }
 }
 
-export function applyArtifactSourceEdits(
+function applyArtifactSourceEditsSequentially(
   source: string,
   edits: ArtifactSourceEdit[]
-): { rawStream: string; applied: AppliedArtifactSourceEdit[] } {
+): AppliedArtifactSourceEdits {
   if (!edits.length) {
     throw new Error("The model did not return any source edits.");
   }
@@ -286,5 +292,157 @@ export function applyArtifactSourceEdits(
   }
   assertProtocolStructurePreserved(source, current);
 
-  return { rawStream: current, applied };
+  return { rawStream: current, applied, rebasedFromOriginal: false };
+}
+
+type OriginalSourceReplacement = {
+  start: number;
+  end: number;
+  replace: string;
+  applied: AppliedArtifactSourceEdit;
+};
+
+function getMinimalReplacement(
+  sourceStart: number,
+  find: string,
+  replace: string,
+  applied: AppliedArtifactSourceEdit
+): OriginalSourceReplacement {
+  let prefixLength = 0;
+  const commonLength = Math.min(find.length, replace.length);
+  while (
+    prefixLength < commonLength &&
+    find[prefixLength] === replace[prefixLength]
+  ) {
+    prefixLength += 1;
+  }
+
+  let suffixLength = 0;
+  while (
+    suffixLength < find.length - prefixLength &&
+    suffixLength < replace.length - prefixLength &&
+    find[find.length - suffixLength - 1] ===
+      replace[replace.length - suffixLength - 1]
+  ) {
+    suffixLength += 1;
+  }
+
+  return {
+    start: sourceStart + prefixLength,
+    end: sourceStart + find.length - suffixLength,
+    replace: replace.slice(prefixLength, replace.length - suffixLength),
+    applied
+  };
+}
+
+/**
+ * Models commonly produce several edits whose `find` strings all come from
+ * ORIGINAL_SOURCE. An earlier replacement can therefore make a later, larger
+ * find string stale even when the actual changed spans do not overlap. Rebase
+ * those minimal changed spans onto the original source as one atomic batch.
+ */
+function applyArtifactSourceEditsFromOriginal(
+  source: string,
+  edits: ArtifactSourceEdit[]
+): AppliedArtifactSourceEdits {
+  if (
+    edits.length < 2 ||
+    edits.some((edit) => edit.target === "streamui")
+  ) {
+    throw new Error("The source edit batch cannot be rebased.");
+  }
+
+  const replacements = edits.map((edit, index) => {
+    const find = edit.find ?? "";
+    if (!find) {
+      throw new Error(`Edit ${index + 1} has an empty find string.`);
+    }
+    if (find === edit.replace) {
+      throw new Error(`Edit ${index + 1} does not change the source.`);
+    }
+
+    const matches = countOccurrences(source, find);
+    if (matches === 0) {
+      throw new Error(`Edit ${index + 1} did not match the original source.`);
+    }
+    if (!edit.occurrence && matches > 1) {
+      throw new Error(
+        `Edit ${index + 1} matched ${matches} places. The model must specify occurrence.`
+      );
+    }
+
+    const occurrence =
+      edit.occurrence && edit.occurrence > matches && matches === 1
+        ? 1
+        : edit.occurrence ?? 1;
+    if (occurrence > matches) {
+      throw new Error(
+        `Edit ${index + 1} requested occurrence ${occurrence}, but only ${matches} matched.`
+      );
+    }
+
+    const start = findOccurrenceIndex(source, find, occurrence);
+    if (start < 0) {
+      throw new Error(`Edit ${index + 1} could not be rebased.`);
+    }
+
+    return getMinimalReplacement(start, find, edit.replace, {
+      note: edit.note,
+      occurrence:
+        edit.occurrence && edit.occurrence > matches ? occurrence : edit.occurrence,
+      findLength: find.length,
+      replaceLength: edit.replace.length
+    });
+  });
+
+  const ascending = [...replacements].sort(
+    (left, right) => left.start - right.start || left.end - right.end
+  );
+  for (let index = 1; index < ascending.length; index += 1) {
+    const previous = ascending[index - 1];
+    const current = ascending[index];
+    const sameInsertion =
+      previous.start === previous.end &&
+      current.start === current.end &&
+      previous.start === current.start;
+    if (current.start < previous.end || sameInsertion) {
+      throw new Error("The source edit batch contains overlapping changes.");
+    }
+  }
+
+  let current = source;
+  for (const replacement of [...replacements].sort(
+    (left, right) => right.start - left.start || right.end - left.end
+  )) {
+    current =
+      current.slice(0, replacement.start) +
+      replacement.replace +
+      current.slice(replacement.end);
+  }
+
+  if (current === source) {
+    throw new Error("The source edits did not change the artifact.");
+  }
+  assertProtocolStructurePreserved(source, current);
+
+  return {
+    rawStream: current,
+    applied: replacements.map((replacement) => replacement.applied),
+    rebasedFromOriginal: true
+  };
+}
+
+export function applyArtifactSourceEdits(
+  source: string,
+  edits: ArtifactSourceEdit[]
+): AppliedArtifactSourceEdits {
+  try {
+    return applyArtifactSourceEditsSequentially(source, edits);
+  } catch (sequentialError) {
+    try {
+      return applyArtifactSourceEditsFromOriginal(source, edits);
+    } catch {
+      throw sequentialError;
+    }
+  }
 }

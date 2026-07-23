@@ -75,9 +75,11 @@ describe("browser-direct provider transport", () => {
     assert.equal(headers.Authorization, "Bearer sk-private-browser-key");
     assert.equal(headers["HTTP-Referer"], "https://chat.aietheia.com");
     assert.equal(headers["X-OpenRouter-Title"], "ChatHTML");
-    const body = String(calls[0].init?.body);
-    assert.doesNotMatch(body, /sk-private-browser-key/);
-    assert.match(body, /vendor\/model/);
+    const bodyText = String(calls[0].init?.body);
+    assert.doesNotMatch(bodyText, /sk-private-browser-key/);
+    assert.match(bodyText, /vendor\/model/);
+    const body = JSON.parse(bodyText) as Record<string, unknown>;
+    assert.equal(body.max_output_tokens, 32_000);
 
     const events = (await response.text())
       .trim()
@@ -126,7 +128,7 @@ describe("browser-direct provider transport", () => {
     const body = JSON.parse(String(calls[0].init?.body)) as Record<string, unknown>;
     assert.equal("messages" in body, true);
     assert.equal("input" in body, false);
-    assert.equal(body.max_tokens, 16_000);
+    assert.equal(body.max_tokens, 32_000);
     const events = (await response.text())
       .trim()
       .split("\n")
@@ -159,6 +161,7 @@ describe("browser-direct provider transport", () => {
         assert.equal(headers["X-OpenRouter-Title"], "ChatHTML");
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
         assert.equal("messages" in body, true);
+        assert.equal(body.max_tokens, 32_000);
         return Response.json({
           choices: [{ message: { content: '{"edits":[]}' } }]
         });

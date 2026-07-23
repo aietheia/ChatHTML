@@ -15,9 +15,9 @@ import type {
 } from "./responsesStreamClient.js";
 
 const apiSettings: ResponsesStreamApiSettings & { apiStyle: "responses" } = {
-  providerName: "Test Provider",
+  providerName: "ChatHTML Service",
   baseUrl: "https://api.example.test/v1",
-  apiKeySource: "manual",
+  apiKeySource: "managed",
   apiKeyEnvironmentName: "",
   apiKey: "secret",
   model: "test/model",
@@ -182,6 +182,7 @@ describe("artifact edit service", () => {
     assert.equal(received?.endpoint, "https://api.example.test/v1/responses");
     assert.equal(received?.maxOutputTokens, 32_000);
     assert.equal(received?.useOpenRouterReasoning, false);
+    assert.equal(received?.disableReasoning, true);
     const firstInput = received?.input[0];
     const firstContent =
       firstInput?.type === "message" && firstInput.role === "user"

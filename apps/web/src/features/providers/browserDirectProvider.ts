@@ -3,6 +3,7 @@ import {
   type ApiSettings
 } from "../../core/apiSettings";
 import { createOpenRouterAttributionHeaders } from "../../core/openRouterAttribution";
+import { PROVIDER_MAX_OUTPUT_TOKENS } from "../../core/providerOutputLimits";
 import type { SessionFile } from "../../domain/chat/sessionModel";
 import {
   SYSTEM_PROMPT,
@@ -631,7 +632,7 @@ export async function startBrowserDirectChatRun(
                 createDirectInstructions(payload, settings)
               ),
               stream: true,
-              max_tokens: 16_000,
+              max_tokens: PROVIDER_MAX_OUTPUT_TOKENS,
               ...(settings.reasoningEffort !== "none"
                 ? { reasoning: { effort: settings.reasoningEffort } }
                 : {})
@@ -641,7 +642,7 @@ export async function startBrowserDirectChatRun(
               input: createResponsesInput(payload),
               instructions: createDirectInstructions(payload, settings),
               stream: true,
-              max_output_tokens: 16_000,
+              max_output_tokens: PROVIDER_MAX_OUTPUT_TOKENS,
               ...(settings.reasoningEffort !== "none"
                 ? { reasoning: { effort: settings.reasoningEffort } }
                 : {})
@@ -703,14 +704,16 @@ export async function requestBrowserDirectText(
                 request.instructions
               ),
               stream: false,
-              max_tokens: request.maxOutputTokens ?? 16_000
+              max_tokens:
+                request.maxOutputTokens ?? PROVIDER_MAX_OUTPUT_TOKENS
             }
           : {
               model: settings.model,
               input: request.input,
               instructions: request.instructions,
               stream: false,
-              max_output_tokens: request.maxOutputTokens ?? 16_000
+              max_output_tokens:
+                request.maxOutputTokens ?? PROVIDER_MAX_OUTPUT_TOKENS
             }
       )
     });

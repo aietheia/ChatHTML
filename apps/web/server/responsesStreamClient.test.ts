@@ -363,7 +363,7 @@ describe("Responses stream client", () => {
         }
       },
       "incomplete",
-      "Responses API returned incomplete."
+      "The model reached its output-token limit before completing the response."
     ],
     [{ type: "response.cancelled" }, "cancelled", "Responses API returned cancelled."]
   ] as const) {
@@ -461,6 +461,21 @@ describe("Responses stream client", () => {
       reasoning: { effort: "high" }
     });
     assert.equal(requestInit?.redirect, "error");
+  });
+
+  it("explicitly disables reasoning for deterministic edit requests", async () => {
+    let requestInit: RequestInit | undefined;
+    await collectStream(["data: [DONE]\n"], {
+      disableReasoning: true,
+      fetchImpl: async (_input, init) => {
+        requestInit = init;
+        return new Response("data: [DONE]\n", { status: 200 });
+      }
+    });
+
+    assert.deepEqual(JSON.parse(String(requestInit?.body)).reasoning, {
+      effort: "none"
+    });
   });
 
   it("does not invoke fetch when an environment key targets an attacker origin", async () => {

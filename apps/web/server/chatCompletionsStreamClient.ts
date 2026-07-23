@@ -32,6 +32,7 @@ export type StreamChatCompletionsOnceOptions = {
   state: ResponsesStreamState;
   signal: AbortSignal;
   useOpenRouterReasoning: boolean;
+  disableReasoning?: boolean;
   maxOutputTokens?: number;
   fetchImpl?: typeof fetch;
 };
@@ -328,6 +329,7 @@ export async function streamChatCompletionsOnce({
   state,
   signal,
   useOpenRouterReasoning,
+  disableReasoning = false,
   maxOutputTokens = RESPONSES_DEFAULT_MAX_OUTPUT_TOKENS,
   fetchImpl = globalThis.fetch
 }: StreamChatCompletionsOnceOptions): Promise<ResponsesFunctionCallItem[]> {
@@ -342,7 +344,9 @@ export async function streamChatCompletionsOnce({
     body.tools = createChatCompletionsTools(tools);
     body.tool_choice = "auto";
   }
-  if (useOpenRouterReasoning && apiSettings.reasoningEffort !== "none") {
+  if (disableReasoning) {
+    body.reasoning = { effort: "none" };
+  } else if (useOpenRouterReasoning && apiSettings.reasoningEffort !== "none") {
     body.reasoning = {
       effort:
         apiSettings.reasoningEffort === "xhigh"

@@ -155,7 +155,7 @@ describe("Chat Completions stream client", () => {
       }
     });
 
-    assert.equal(requestBody?.max_tokens, 16_000);
+    assert.equal(requestBody?.max_tokens, 32_000);
     assert.equal(requestHeaders.get("HTTP-Referer"), null);
     assert.equal(requestHeaders.get("X-OpenRouter-Title"), null);
     assert.equal(Array.isArray(requestBody?.messages), true);
@@ -175,6 +175,28 @@ describe("Chat Completions stream client", () => {
     ]);
     assert.equal(streamState.contentChars, 8);
     assert.equal(streamState.reasoningChars, 6);
+  });
+
+  it("explicitly disables reasoning for deterministic edit requests", async () => {
+    let requestBody: Record<string, unknown> | undefined;
+    await streamChatCompletionsOnce({
+      endpoint: "https://provider.example/v1/chat/completions",
+      apiSettings,
+      input: [],
+      instructions: "Edit.",
+      tools: [],
+      emit: () => undefined,
+      state: state(),
+      signal: new AbortController().signal,
+      useOpenRouterReasoning: false,
+      disableReasoning: true,
+      fetchImpl: async (_input, init) => {
+        requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response("data: [DONE]\n", { status: 200 });
+      }
+    });
+
+    assert.deepEqual(requestBody?.reasoning, { effort: "none" });
   });
 
   it("surfaces non-terminal finish reasons as incomplete", async () => {

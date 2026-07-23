@@ -15,10 +15,10 @@ import type {
   ResponsesStreamState,
   StreamResponsesOnceOptions
 } from "./responsesStreamClient.js";
+import { isOpenRouterRuntime } from "./responsesStreamClient.js";
 import type { ApiStyle } from "./runtimeApiSettings.js";
+import { PROVIDER_MAX_OUTPUT_TOKENS } from "../src/core/providerOutputLimits.js";
 import { COMFORTABLE_LEGIBILITY_PROMPT } from "../src/server/visualLegibilityPolicy.js";
-
-const ARTIFACT_EDIT_MAX_OUTPUT_TOKENS = 32_000;
 
 export type ArtifactEditRuntimeSettingsPort = {
   read(input: unknown): ResponsesStreamApiSettings & { apiStyle: ApiStyle };
@@ -76,8 +76,10 @@ Return only JSON with this exact shape:
 
 Rules:
 - Apply the user's request by editing ORIGINAL_SOURCE, not by regenerating the whole artifact.
-- Every find value must be an exact contiguous substring from ORIGINAL_SOURCE or from the source after earlier edits.
+- Every find value must be an exact contiguous substring from ORIGINAL_SOURCE. The server applies the edits as one atomic batch.
+- Keep the actual changed spans non-overlapping. If two changes would overlap, combine them into one edit.
 - Keep edits small and targeted. Use multiple edits when that is clearer.
+- Use at most 12 find/replace edits. If the change genuinely needs more, replace the complete streamui block instead.
 - The user's prompt decides the edit scope. Selected references are anchors for intent and disambiguation, not boundaries.
 - Do not limit changes to selected elements/text unless the user explicitly asks to change only the selection.
 - For broad requests such as "change the whole page" or "make the entire artifact about X", prefer one {"target":"streamui","replace":"..."} edit containing the complete replacement <streamui>...</streamui> block.
@@ -149,7 +151,10 @@ export async function runArtifactEditModel(
     state,
     signal,
     useOpenRouterReasoning: false,
-    maxOutputTokens: ARTIFACT_EDIT_MAX_OUTPUT_TOKENS
+    disableReasoning:
+      apiSettings.apiKeySource === "managed" ||
+      isOpenRouterRuntime(apiSettings),
+    maxOutputTokens: PROVIDER_MAX_OUTPUT_TOKENS
   });
 
   const parsed = parseArtifactSourceEditModelText(rawModelText);
@@ -234,7 +239,7 @@ export function createArtifactEditHandler(ports: ArtifactEditServicePorts) {
       const applied = applyArtifactSourceEdits(request.value.source, result.edits);
       completed = true;
       logger.info(
-        `[artifact-edit:${requestId}] complete duration_ms=${now() - startedAt} edits=${applied.applied.length}`
+        `[artifact-edit:${requestId}] complete duration_ms=${now() - startedAt} edits=${applied.applied.length} rebased_from_original=${applied.rebasedFromOriginal}`
       );
       if (!connectionClosed) {
         res.json({
