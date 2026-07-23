@@ -380,7 +380,10 @@ export function getResponsesTerminalFailure(
 
   if (status === "incomplete") {
     return {
-      message: "Responses API returned incomplete.",
+      message:
+        incompleteReason === "max_output_tokens"
+          ? "The model reached its output-token limit before completing the response."
+          : "Responses API returned incomplete.",
       status,
       incompleteReason
     };

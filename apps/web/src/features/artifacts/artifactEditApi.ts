@@ -2,6 +2,7 @@ import { clientRequestHeaders } from "../../api/client";
 import { apiUrl } from "../../api/appUrl";
 import type { ArtifactEditReference } from "../../domain/chat/sessionModel";
 import { normalizeApiSettings } from "../../core/apiSettings";
+import { PROVIDER_MAX_OUTPUT_TOKENS } from "../../core/providerOutputLimits";
 import { formatChatHttpError } from "../chat/chatErrors";
 import { requestBrowserDirectText } from "../providers/browserDirectProvider";
 import { COMFORTABLE_LEGIBILITY_PROMPT } from "../../server/visualLegibilityPolicy";
@@ -108,7 +109,7 @@ ${COMFORTABLE_LEGIBILITY_PROMPT}`,
           ].join("\n")
         }
       ],
-      maxOutputTokens: 32_000
+      maxOutputTokens: PROVIDER_MAX_OUTPUT_TOKENS
     },
     signal,
     fetchImpl

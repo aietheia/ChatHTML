@@ -1,5 +1,6 @@
 import type { ApiKeySource, RuntimeReasoningEffort } from "./runtimeApiSettings.js";
 import { createProviderAuthorizationHeaders } from "./providerEndpointTrust.js";
+import { PROVIDER_MAX_OUTPUT_TOKENS } from "../src/core/providerOutputLimits.js";
 import {
   createOpenRouterAttributionHeaders,
   isOpenRouterProvider
@@ -17,7 +18,8 @@ import {
   type ResponsesStreamEvent
 } from "./responsesEventReducer.js";
 
-export const RESPONSES_DEFAULT_MAX_OUTPUT_TOKENS = 16_000;
+export const RESPONSES_DEFAULT_MAX_OUTPUT_TOKENS =
+  PROVIDER_MAX_OUTPUT_TOKENS;
 export const RESPONSES_MAX_ERROR_BODY_BYTES = 262_144;
 export const RESPONSES_MAX_STREAM_BYTES = 67_108_864;
 export const RESPONSES_MAX_SSE_LINE_CHARS = 2_097_152;
@@ -54,6 +56,7 @@ export type StreamResponsesOnceOptions = {
   state: ResponsesStreamState;
   signal: AbortSignal;
   useOpenRouterReasoning: boolean;
+  disableReasoning?: boolean;
   maxOutputTokens?: number;
   fetchImpl?: typeof fetch;
 };
@@ -316,6 +319,7 @@ export async function streamResponsesOnce({
   state,
   signal,
   useOpenRouterReasoning,
+  disableReasoning = false,
   maxOutputTokens = RESPONSES_DEFAULT_MAX_OUTPUT_TOKENS,
   fetchImpl = globalThis.fetch
 }: StreamResponsesOnceOptions): Promise<ResponsesFunctionCallItem[]> {
@@ -332,10 +336,12 @@ export async function streamResponsesOnce({
     body.tools = tools;
     body.tool_choice = "auto";
   }
-  const reasoning = getResponsesReasoning(
-    apiSettings.reasoningEffort,
-    useOpenRouterReasoning
-  );
+  const reasoning = disableReasoning
+    ? { effort: "none" as const }
+    : getResponsesReasoning(
+        apiSettings.reasoningEffort,
+        useOpenRouterReasoning
+      );
   if (reasoning) {
     body.reasoning = reasoning;
   }

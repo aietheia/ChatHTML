@@ -118,6 +118,45 @@ describe("artifact source edit application", () => {
     assert.equal(result.applied[0].occurrence, 1);
   });
 
+  it("rebases independent changes whose larger find strings came from the original source", () => {
+    const source =
+      "<streamui><style>.card { color: red; }.page { background: white; }</style></streamui>";
+    const result = applyArtifactSourceEdits(source, [
+      {
+        find: ".card { color: red; }.page { background: white; }",
+        replace: ".card { color: pink; }.page { background: white; }"
+      },
+      {
+        find: ".card { color: red; }.page { background: white; }",
+        replace: ".card { color: red; }.page { background: lavender; }"
+      }
+    ]);
+
+    assert.equal(
+      result.rawStream,
+      "<streamui><style>.card { color: pink; }.page { background: lavender; }</style></streamui>"
+    );
+    assert.equal(result.rebasedFromOriginal, true);
+    assert.equal(result.applied.length, 2);
+  });
+
+  it("does not rebase conflicting changes to the same original span", () => {
+    assert.throws(
+      () =>
+        applyArtifactSourceEdits("<streamui><p>red</p></streamui>", [
+          {
+            find: "<p>red</p>",
+            replace: "<p>pink</p>"
+          },
+          {
+            find: "<p>red</p>",
+            replace: "<p>blue</p>"
+          }
+        ]),
+      /Edit 2 did not match the current source/
+    );
+  });
+
   it("rejects an ambiguous edit without an occurrence", () => {
     assert.throws(
       () =>

@@ -294,7 +294,8 @@ describe("Responses event reducer", () => {
       incompleteReason: ""
     });
     assert.deepEqual(incomplete, {
-      message: "Responses API returned incomplete.",
+      message:
+        "The model reached its output-token limit before completing the response.",
       status: "incomplete",
       incompleteReason: "max_output_tokens"
     });
